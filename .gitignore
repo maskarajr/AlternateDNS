@@ -37,3 +37,6 @@ config.yaml
 dist/
 build/
 
+# Setup guides (not for public)
+SETUP_GITHUB.md
+
