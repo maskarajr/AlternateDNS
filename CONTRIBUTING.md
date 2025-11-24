@@ -1,49 +1,40 @@
-# Contributing to AlternateDNS (Enhanced Fork)
+# Contributing to AlternateDNS (Community Edition)
 
 Thank you for your interest in contributing to AlternateDNS! This document provides guidelines and information for contributors.
 
 ## About This Fork
 
-This is a **community-maintained fork** of the original AlternateDNS project. We maintain this fork to add features, accept contributions, and provide ongoing updates while properly crediting the original author.
+This is the **actively maintained fork** of the original AlternateDNS project. All future issues, features, and pull requests should target **this repository**. We continue to credit and respect the original author while evolving the project.
 
 ## Original Author & Attribution
 
 **Original Author:** [MaxIsJoe](https://github.com/MaxIsJoe)  
 **Original Repository:** https://github.com/MaxIsJoe/AlternateDNS
 
-All contributions to this fork must maintain proper attribution to the original author. When making significant changes, please acknowledge the original work in your commit messages and pull requests. The original author's work and code structure should always be credited.
+We are building on top of MaxIsJoe’s original work. Keep attribution intact in source files and changelog entries, and mention the original project when describing major feature additions.
 
 ## How to Contribute
 
 ### 1. Fork and Clone
 
-1. Fork the repository on GitHub
-2. Clone your fork:
+1. Fork **this repository** (maskarajr/AlternateDNS) on GitHub.
+2. Clone your fork locally:
    ```bash
    git clone https://github.com/YOUR_USERNAME/AlternateDNS.git
    cd AlternateDNS
    ```
 
-### 2. Set Up Remotes (Optional)
+### 2. (Optional) Track the Original Project
 
-If you want to track the original repository for reference:
+If you need to compare with the upstream project, add a read-only remote:
 
 ```bash
 git remote add upstream https://github.com/MaxIsJoe/AlternateDNS.git
 ```
 
-Verify your remotes:
-```bash
-git remote -v
-```
-
-You should see:
-- `origin` - this fork's repository
-- `upstream` - original repository (optional, for reference only)
+`origin` should always point to your fork of this community edition. Never open pull requests against the original upstream repository unless coordinated with MaxIsJoe.
 
 ### 3. Create a Branch
-
-Create a feature branch for your changes:
 
 ```bash
 git checkout -b feature/your-feature-name
@@ -71,9 +62,7 @@ git commit -m "Add: Description of your changes"
 git push origin feature/your-feature-name
 ```
 
-Then create a Pull Request on GitHub to this repository (the enhanced fork).
-
-**Note:** Pull requests should be made to this fork's repository, not the original repository.
+Open a Pull Request against **maskarajr/AlternateDNS**. Clearly describe the motivation, implementation details, and testing performed. PRs to the original repo will be closed and redirected here.
 
 ## Code Style
 
@@ -105,10 +94,10 @@ If you have questions, please open an issue on this repository.
 ## Attribution Requirements
 
 When contributing, please:
-- Maintain all existing attribution to the original author
-- Add your name to commit messages for significant contributions
-- Acknowledge the original work when making major changes
-- Keep the original author's code structure and style where possible
+- Keep original copyright notices and references to MaxIsJoe intact.
+- Mention the original project in release notes or large feature PRs.
+- Add yourself to AUTHORS.md for meaningful contributions.
+- Follow the established style so the codebase stays approachable.
 
 Thank you for contributing!
 
