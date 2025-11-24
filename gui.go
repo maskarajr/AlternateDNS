@@ -23,6 +23,7 @@ var statusDNSLabel *widget.Label
 var statusStatusLabel *widget.Label
 var statusCountdownLabel *widget.Label
 var statusInterfacesLabel *widget.Label
+var statusInterfaceSelect *widget.Select
 var statusStartStopBtn *widget.Button
 var statusChangeNowBtn *widget.Button
 var dnsList *widget.List
@@ -96,6 +97,16 @@ func createStatusTab() fyne.CanvasObject {
 	// Interfaces
 	statusInterfacesLabel = widget.NewLabel("No interfaces detected")
 	statusInterfacesLabel.Wrapping = fyne.TextWrapWord
+	statusInterfaceSelect = widget.NewSelect([]string{}, func(value string) {
+		if value == "" || value == appState.GetSelectedInterface() {
+			return
+		}
+		appState.SetSelectedInterface(value)
+		appState.AddLog(fmt.Sprintf("Active interface set to %s", value))
+		updateLogsDisplay()
+	})
+	statusInterfaceSelect.PlaceHolder = "Select interface"
+	statusInterfaceSelect.Disable()
 
 	// Buttons
 	statusStartStopBtn = widget.NewButton("Start Service", func() {
@@ -129,7 +140,10 @@ func createStatusTab() fyne.CanvasObject {
 		widget.NewCard("Current DNS", "", statusDNSLabel),
 		widget.NewCard("Service Status", "", statusStatusLabel),
 		widget.NewCard("Next Change In", "", statusCountdownLabel),
-		widget.NewCard("Active Interfaces", "", statusInterfacesLabel),
+		widget.NewCard("Active Interfaces", "", container.NewVBox(
+			statusInterfacesLabel,
+			statusInterfaceSelect,
+		)),
 		container.NewHBox(statusStartStopBtn, statusChangeNowBtn),
 	)
 
@@ -486,10 +500,45 @@ func updateStatusDisplay() {
 
 		// Update interfaces
 		interfaces := appState.GetInterfaces()
-		if len(interfaces) > 0 {
-			statusInterfacesLabel.SetText(strings.Join(interfaces, ", "))
+		if statusInterfaceSelect != nil {
+			selectedInterface := appState.GetSelectedInterface()
+			switch {
+			case len(interfaces) == 0:
+				statusInterfacesLabel.SetText("No interfaces detected")
+				statusInterfaceSelect.Options = []string{}
+				statusInterfaceSelect.ClearSelected()
+				statusInterfaceSelect.PlaceHolder = "No interfaces"
+				statusInterfaceSelect.Disable()
+			case len(interfaces) == 1:
+				single := interfaces[0]
+				statusInterfacesLabel.SetText(single)
+				statusInterfaceSelect.Options = interfaces
+				if statusInterfaceSelect.Selected != single {
+					statusInterfaceSelect.SetSelected(single)
+				}
+				appState.SetSelectedInterface(single)
+				statusInterfaceSelect.Disable()
+			default:
+				statusInterfacesLabel.SetText(strings.Join(interfaces, ", "))
+				statusInterfaceSelect.Options = interfaces
+				if selectedInterface == "" {
+					selectedInterface = interfaces[0]
+					appState.SetSelectedInterface(selectedInterface)
+				}
+				if statusInterfaceSelect.Selected != selectedInterface {
+					statusInterfaceSelect.SetSelected(selectedInterface)
+				}
+				if statusInterfaceSelect.Disabled() {
+					statusInterfaceSelect.Enable()
+				}
+			}
+			statusInterfaceSelect.Refresh()
 		} else {
-			statusInterfacesLabel.SetText("No interfaces detected")
+			if len(interfaces) > 0 {
+				statusInterfacesLabel.SetText(strings.Join(interfaces, ", "))
+			} else {
+				statusInterfacesLabel.SetText("No interfaces detected")
+			}
 		}
 
 		// Refresh DNS list to show current marker

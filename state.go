@@ -7,16 +7,17 @@ import (
 
 // AppState manages the application state thread-safely
 type AppState struct {
-	mu              sync.RWMutex
-	isRunning       bool
-	currentDNS      string
-	currentDNSIndex int
-	nextChangeTime  time.Time
-	debugMode       bool
-	ticker          *time.Ticker
-	interfaces      []string
-	logs            []string
-	maxLogs         int
+	mu                sync.RWMutex
+	isRunning         bool
+	currentDNS        string
+	currentDNSIndex   int
+	nextChangeTime    time.Time
+	debugMode         bool
+	ticker            *time.Ticker
+	interfaces        []string
+	selectedInterface string
+	logs              []string
+	maxLogs           int
 }
 
 var appState = &AppState{
@@ -88,12 +89,43 @@ func (s *AppState) SetInterfaces(ifaces []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.interfaces = ifaces
+	// Keep currently selected interface if still present, otherwise default to first available
+	if len(ifaces) == 0 {
+		s.selectedInterface = ""
+		return
+	}
+	if s.selectedInterface == "" {
+		s.selectedInterface = ifaces[0]
+		return
+	}
+	found := false
+	for _, iface := range ifaces {
+		if iface == s.selectedInterface {
+			found = true
+			break
+		}
+	}
+	if !found {
+		s.selectedInterface = ifaces[0]
+	}
 }
 
 func (s *AppState) GetInterfaces() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.interfaces
+}
+
+func (s *AppState) SetSelectedInterface(iface string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selectedInterface = iface
+}
+
+func (s *AppState) GetSelectedInterface() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.selectedInterface
 }
 
 func (s *AppState) AddLog(message string) {
@@ -118,4 +150,3 @@ func (s *AppState) ClearLogs() {
 	defer s.mu.Unlock()
 	s.logs = []string{}
 }
-

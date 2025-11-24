@@ -279,11 +279,34 @@ func applyDNS(currentDNS string, currentIdx int) error {
 
 	switch runtime.GOOS {
 	case "windows": // fuck you
-		interfaces, err := getActiveWindowsInterfaces()
+		activeInterfaces, err := getActiveWindowsInterfaces()
 		if err != nil {
 			return err
 		}
-		for _, iface := range interfaces {
+		// Keep app state in sync
+		appState.SetInterfaces(activeInterfaces)
+
+		targetInterfaces := activeInterfaces
+		selected := appState.GetSelectedInterface()
+		if selected != "" {
+			found := false
+			for _, iface := range activeInterfaces {
+				if iface == selected {
+					targetInterfaces = []string{selected}
+					found = true
+					break
+				}
+			}
+			if !found {
+				appState.AddLog(fmt.Sprintf("Selected interface %s not found, applying DNS to all interfaces", selected))
+			}
+		}
+
+		if len(targetInterfaces) == 0 {
+			return fmt.Errorf("no active network interfaces available")
+		}
+
+		for _, iface := range targetInterfaces {
 			cmd := exec.Command("powershell", "Set-DnsClientServerAddress", "-InterfaceAlias", iface, "-ServerAddresses", currentDNS)
 			output, err := cmd.CombinedOutput()
 			if err != nil {
@@ -360,7 +383,22 @@ func getActiveWindowsInterfaces() ([]string, error) {
 		log.Printf("Error executing PowerShell command: %v, output: %s", err, output)
 		return nil, fmt.Errorf("error executing PowerShell command: %v, output: %s", err, output)
 	}
-	interfaces := strings.Fields(string(output))
+	text := strings.TrimSpace(string(output))
+	if text == "" {
+		return []string{}, nil
+	}
+
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+
+	var interfaces []string
+	for _, line := range lines {
+		name := strings.TrimSpace(line)
+		if name != "" {
+			interfaces = append(interfaces, name)
+		}
+	}
+
 	return interfaces, nil
 }
 

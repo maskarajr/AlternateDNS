@@ -3,7 +3,7 @@ dns_addresses:
 - 149.112.112.112
 - 1.1.1.1
 - 1.0.0.1
-run_on_startup: true
+run_on_startup: false
 change_interval_hours: 6
 notify_user: true
 test_domains:
@@ -12,4 +12,3 @@ test_domains:
 - github.com
 - microsoft.com
 - amazon.com
-
