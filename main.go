@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"fyne.io/fyne/v2"
 	"github.com/gen2brain/beeep"
 	"github.com/getlantern/systray"
 	"gopkg.in/yaml.v2"
@@ -20,111 +21,148 @@ type Config struct {
 	RunOnStartup        bool     `yaml:"run_on_startup"`
 	ChangeIntervalHours int      `yaml:"change_interval_hours"`
 	NotifyUser          bool     `yaml:"notify_user"`
+	TestDomains         []string `yaml:"test_domains"` // Domains used for DNS latency testing
 }
 
 var config Config
-var currentDNSIndex int
-var debugMode bool
 var appIcon []byte
 
+// Custom writer that redirects to appState logs
+type logWriter struct{}
+
+func (w logWriter) Write(p []byte) (n int, err error) {
+	message := strings.TrimSpace(string(p))
+	if message != "" {
+		appState.AddLog(message)
+		// Update GUI if available (safely check if GUI is initialized)
+		if mainWindow != nil {
+			fyne.Do(func() {
+				updateLogsDisplay()
+			})
+		}
+	}
+	return len(p), nil
+}
+
 func main() {
+	// Redirect standard log output to appState (all log.Printf, log.Println, etc. will go to Logs tab)
+	log.SetOutput(logWriter{})
 
+	// Check for debug flag
 	if len(os.Args) > 1 && os.Args[1] == "--debug" {
-		debugMode = true
-		log.Println("Debug mode enabled")
+		appState.SetDebugMode(true)
+		appState.AddLog("Debug mode enabled via command line")
 	}
 
-	err := checkAdmin()
-	if err != nil {
-		log.Fatalf("Admin check failed: %v", err)
-	}
-
-	// Beep can get the icon without doing this, but systray is annoying and needs the byte data of the icon ready
+	// Try to load icon from file, fallback to embedded
 	appIcon = getIcon("icon.ico")
-
-	err = readConfig()
-	if err != nil {
-		log.Fatalf("Failed to read config: %v", err)
+	if len(appIcon) == 0 {
+		appIcon = getEmbeddedIcon()
 	}
 
+	// Read config
+	err := readConfig()
+	if err != nil {
+		// Show error in GUI if possible, otherwise fatal
+		log.Printf("Failed to read config: %v", err)
+	}
+
+	// Debug mode will be set via GUI or command line flag
+
+	// Get active interfaces
 	if runtime.GOOS == "windows" {
 		ifaces, err := getActiveWindowsInterfaces()
 		if err != nil {
-			log.Fatalf("Failed to get active interfaces: %v", err)
+			appState.AddLog(fmt.Sprintf("Warning: Failed to get active interfaces: %v", err))
+		} else {
+			appState.SetInterfaces(ifaces)
+			appState.AddLog(fmt.Sprintf("Active interfaces: %v", ifaces))
 		}
-		log.Println("Active interfaces:", ifaces)
 	}
 
 	if runtime.GOOS == "darwin" {
-		log.Println("Oi, quick note: I don't use a Mac, this is a toy project of mine to learn Golang. If you encounter issues with this, don't complain about it because I literally cannot fix it for you.")
+		appState.AddLog("Note: macOS support is experimental")
 	}
 
+	// Set startup if configured
 	if config.RunOnStartup {
 		err = setRunOnStartup()
 		if err != nil {
-			log.Fatalf("Failed to set run on startup: %v", err)
+			appState.AddLog(fmt.Sprintf("Warning: Failed to set run on startup: %v", err))
 		}
 	}
 
-	systray.Run(onReady, onExit)
+	// Initialize GUI on main thread (Fyne requirement)
+	setupGUI()
+
+	// Initialize systray in background goroutine
+	go func() {
+		systray.Run(onReady, onExit)
+	}()
+
+	// Run Fyne event loop (this blocks and handles GUI events)
+	guiApp.Run()
 }
 
 func onReady() {
 	systray.SetIcon(appIcon)
-	systray.SetTitle("DNS Changer")
-	systray.SetTooltip("DNS Changer running")
+	systray.SetTitle("AlternateDNS")
+	systray.SetTooltip("AlternateDNS - DNS Rotation Tool")
 
-	mChange := systray.AddMenuItem("Change DNS", "Cycle to the next DNS server if you're having trouble with the current one.")
+	mOpenWindow := systray.AddMenuItem("Open Window", "Show the main window")
+	mChange := systray.AddMenuItem("Change DNS", "Cycle to the next DNS server")
 	mQuit := systray.AddMenuItem("Quit", "Quit the application")
 
-	var ticker *time.Ticker
-	if debugMode {
-		ticker = time.NewTicker(10 * time.Second)
-	} else {
-		ticker = time.NewTicker(time.Duration(config.ChangeIntervalHours) * time.Hour)
+	// Auto-start if configured
+	if config.RunOnStartup {
+		// Don't auto-start, let user control via GUI
+		appState.AddLog("Application started (auto-start disabled, use GUI to start service)")
 	}
-	defer ticker.Stop()
-	Tick()
 
 	for {
 		select {
+		case <-mOpenWindow.ClickedCh:
+			showWindow()
 		case <-mQuit.ClickedCh:
-			systray.Quit()
-			os.Exit(1)
-		case <-mChange.ClickedCh:
-			err := changeDNS()
-			if err != nil {
-				beeep.Alert("DNS Change Error", err.Error(), "icon.ico")
-				os.Exit(1)
+			// Stop service if running
+			if appState.IsRunning() {
+				stopService()
 			}
-		case <-ticker.C:
-			Tick()
+			systray.Quit()
+			os.Exit(0)
+		case <-mChange.ClickedCh:
+			go func() {
+				err := changeDNS(true) // Force change from systray menu
+				if err != nil {
+					beeep.Alert("DNS Change Error", err.Error(), "")
+					appState.AddLog(fmt.Sprintf("ERROR: %v", err))
+					updateLogsDisplay()
+				} else {
+					dns, idx := appState.GetCurrentDNS()
+					appState.AddLog(fmt.Sprintf("DNS changed to %s (index %d)", dns, idx))
+					updateLogsDisplay()
+					updateStatusDisplay()
+				}
+			}()
 		}
 	}
 }
 
-func Tick() {
-	err := changeDNS()
-	if err != nil && config.NotifyUser {
-		beeep.Alert("DNS Change Error", err.Error(), "icon.ico")
-		os.Exit(1) // something clearly went wrong. Just exit instead of fucking something up.
-	}
-	if debugMode {
-		log.Println("Tick.") // Tick
-	}
-}
+// Tick is now handled by startTickerLoop in gui.go
 
 func onExit() {
-	// idk what to clean up here. Maybe revert to the last DNS before starting this?
-	if debugMode {
-		log.Println("Exiting the application")
+	// Stop service if running
+	if appState.IsRunning() {
+		stopService()
+	}
+	if appState.GetDebugMode() {
+		appState.AddLog("Exiting the application")
 	}
 }
 
 func checkAdmin() error {
-
-	if debugMode {
-		log.Println("OS: " + runtime.GOOS)
+	if appState.GetDebugMode() {
+		appState.AddLog(fmt.Sprintf("OS: %s", runtime.GOOS))
 	}
 
 	switch runtime.GOOS {
@@ -145,19 +183,35 @@ func checkAdmin() error {
 }
 
 func readConfig() error {
-	data, err := os.ReadFile("config.yaml")
+	configPath, err := getConfigPath()
+	if err != nil {
+		return fmt.Errorf("failed to get config path: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
 	if os.IsNotExist(err) {
-		err = generateDefaultConfig()
-		if err != nil {
-			return err
-		}
-		data, err = os.ReadFile("config.yaml")
-		if err != nil {
-			return err
+		// Use embedded default config
+		data = getEmbeddedDefaultConfig()
+		if len(data) == 0 {
+			// Fallback: generate default config
+			err = generateDefaultConfig()
+			if err != nil {
+				return err
+			}
+			data, err = os.ReadFile(configPath)
+			if err != nil {
+				return err
+			}
+		} else {
+			// Write embedded config to file
+			err = os.WriteFile(configPath, data, 0644)
+			if err != nil {
+				return fmt.Errorf("failed to write default config: %v", err)
+			}
 		}
 	} else if err != nil {
 		return err
-	} // this hurts my soul
+	}
 
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
@@ -170,14 +224,57 @@ func readConfig() error {
 	return nil
 }
 
-func changeDNS() error {
+// changeDNS changes the DNS server. If forceChange is true, it switches to the next DNS
+// without latency testing. If false, it uses smart switching logic to compare latencies.
+func changeDNS(forceChange bool) error {
 	if len(config.DNSAddresses) == 0 {
 		return fmt.Errorf("no DNS addresses specified in config")
 	}
 
-	currentDNS := config.DNSAddresses[currentDNSIndex]
-	currentDNSIndex = (currentDNSIndex + 1) % len(config.DNSAddresses)
+	_, currentIdx := appState.GetCurrentDNS()
 
+	// If no DNS is set yet (first time), just set the first one without testing
+	if currentIdx < 0 || currentIdx >= len(config.DNSAddresses) {
+		currentIdx = 0
+		currentDNS := config.DNSAddresses[currentIdx]
+		// Apply DNS immediately without testing on first run
+		return applyDNS(currentDNS, currentIdx)
+	}
+
+	currentDNS := config.DNSAddresses[currentIdx]
+	nextIndex := (currentIdx + 1) % len(config.DNSAddresses)
+	nextDNS := config.DNSAddresses[nextIndex]
+
+	// If force change, skip latency testing and switch immediately
+	if forceChange {
+		appState.AddLog(fmt.Sprintf("Force changing DNS from %s to %s", currentDNS, nextDNS))
+		return applyDNS(nextDNS, nextIndex)
+	}
+
+	// Smart switching: Test current vs next DNS before switching (only for automatic changes)
+	testDomains := config.TestDomains
+	if len(testDomains) == 0 {
+		testDomains = defaultTestDomains
+	}
+
+	betterDNS, betterIdx, shouldSwitch := compareDNS(currentDNS, currentIdx, nextDNS, nextIndex, testDomains)
+
+	if !shouldSwitch {
+		appState.AddLog(fmt.Sprintf("Keeping current DNS (%s) - it performs better than next DNS (%s)", currentDNS, nextDNS))
+		// Still apply the current DNS to ensure it's set
+		return applyDNS(betterDNS, betterIdx)
+	}
+
+	// Switch to better DNS
+	appState.AddLog(fmt.Sprintf("Switching from %s to %s (better performance)", currentDNS, betterDNS))
+	currentDNS = betterDNS
+	currentIdx = betterIdx
+
+	return applyDNS(currentDNS, currentIdx)
+}
+
+// applyDNS applies the DNS settings to the system
+func applyDNS(currentDNS string, currentIdx int) error {
 	var allErrors []string
 
 	switch runtime.GOOS {
@@ -192,25 +289,23 @@ func changeDNS() error {
 			if err != nil {
 				errMsg := fmt.Sprintf("Error changing DNS for interface %s to %s: %v. Output: %s", iface, currentDNS, err, string(output))
 				allErrors = append(allErrors, errMsg)
-				if debugMode {
-					log.Println(errMsg)
+				appState.AddLog(errMsg)
+			} else {
+				if appState.GetDebugMode() {
+					appState.AddLog(fmt.Sprintf("Changed DNS for interface %s to %s", iface, currentDNS))
 				}
-			} else if debugMode {
-				log.Printf("Changed DNS for interface %s to %s. Output: %s", iface, currentDNS, string(output))
 			}
 		}
 	case "linux": // THE GOAT
 		cmd := exec.Command("sh", "-c", fmt.Sprintf("echo 'nameserver %s' | sudo tee /etc/resolv.conf", currentDNS))
-		if debugMode {
-			log.Printf("Setting DNS on Linux to %s", currentDNS)
+		if appState.GetDebugMode() {
+			appState.AddLog(fmt.Sprintf("Setting DNS on Linux to %s", currentDNS))
 		}
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			errMsg := fmt.Sprintf("Error setting DNS on Linux to %s: %v. Output: %s", currentDNS, err, string(output))
 			allErrors = append(allErrors, errMsg)
-			if debugMode {
-				log.Println(errMsg)
-			}
+			appState.AddLog(errMsg)
 		}
 	case "darwin": //shitos
 		cmd := exec.Command("networksetup", "-setdnsservers", "Wi-Fi", currentDNS)
@@ -218,24 +313,42 @@ func changeDNS() error {
 		if err != nil {
 			errMsg := fmt.Sprintf("Error setting DNS on macOS to %s: %v. Output: %s", currentDNS, err, string(output))
 			allErrors = append(allErrors, errMsg)
-			if debugMode {
-				log.Println(errMsg)
-			}
+			appState.AddLog(errMsg)
 		}
 	default:
 		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 	}
 
 	if len(allErrors) > 0 {
-		return fmt.Errorf(strings.Join(allErrors, "\n"))
+		errorMsg := strings.Join(allErrors, "\n")
+		return fmt.Errorf("%s", errorMsg)
 	}
 
 	if config.NotifyUser {
 		err := beeep.Notify("DNS Change", fmt.Sprintf("DNS has been changed to %s", currentDNS), "")
 		if err != nil {
-			return err
+			appState.AddLog(fmt.Sprintf("Warning: Failed to show notification: %v", err))
 		}
 	}
+
+	// Update state with new DNS
+	appState.SetCurrentDNS(currentDNS, currentIdx)
+
+	// Calculate next change time
+	var interval time.Duration
+	if appState.GetDebugMode() {
+		interval = 10 * time.Second
+	} else {
+		interval = time.Duration(config.ChangeIntervalHours) * time.Hour
+	}
+	appState.SetNextChangeTime(time.Now().Add(interval))
+
+	// Update GUI if available
+	if mainWindow != nil {
+		updateStatusDisplay()
+		updateLogsDisplay()
+	}
+
 	return nil
 }
 
@@ -254,12 +367,18 @@ func getActiveWindowsInterfaces() ([]string, error) {
 func getIcon(s string) []byte {
 	b, err := os.ReadFile(s)
 	if err != nil {
-		log.Fatal("TF2 COCONUT CRASH ", err)
+		// Return empty if file doesn't exist, will use embedded
+		return nil
 	}
 	return b
 }
 
 func generateDefaultConfig() error {
+	configPath, err := getConfigPath()
+	if err != nil {
+		return fmt.Errorf("failed to get config path: %v", err)
+	}
+
 	defaultConfig := Config{
 		DNSAddresses:        []string{"1.1.1.1", "1.0.0.1", "9.9.9.9"},
 		RunOnStartup:        true,
@@ -272,7 +391,7 @@ func generateDefaultConfig() error {
 		return err
 	}
 
-	err = os.WriteFile("config.yaml", data, 0644)
+	err = os.WriteFile(configPath, data, 0644)
 	if err != nil {
 		return err
 	}
