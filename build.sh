@@ -25,16 +25,26 @@ echo ""
 echo "Starting build (this may take a minute)..."
 echo ""
 
+# Create dist folder if it doesn't exist
+mkdir -p dist
+
 # Enable CGO for Fyne (required on Linux/macOS too)
 export CGO_ENABLED=1
 
 # Build with same flags as Windows (minus -H windowsgui which is Windows-only)
-go build -ldflags="-s -w" -o AlternateDNS
+go build -ldflags="-s -w" -o dist/AlternateDNS
 
 if [ $? -eq 0 ]; then
-    echo "Build successful! AlternateDNS created."
+    # Copy default_config.yaml to dist folder for reference
+    if [ -f "default_config.yaml" ]; then
+        cp "default_config.yaml" "dist/default_config.yaml"
+        echo "Copied default_config.yaml to dist folder"
+    fi
+    
+    echo ""
+    echo "Build successful! dist/AlternateDNS created."
     echo "File size:"
-    ls -lh AlternateDNS
+    ls -lh dist/AlternateDNS
     echo ""
 else
     echo "Build failed!"

@@ -34,8 +34,14 @@ Thumbs.db
 config.yaml
 
 # Build artifacts
-dist/
+dist/*
+!dist/build.bat
+!dist/build.sh
 build/
+
+# Windows resource files
+*.syso
+icon.syso
 
 # Setup guides (not for public)
 SETUP_GITHUB.md

@@ -225,7 +225,7 @@ func readConfig() error {
 }
 
 // changeDNS changes the DNS server. If forceChange is true, it switches to the next DNS
-// without latency testing. If false, it uses smart switching logic to compare latencies.
+// without latency testing. If false, it tests all DNS servers and uses the one with lowest latency.
 func changeDNS(forceChange bool) error {
 	if len(config.DNSAddresses) == 0 {
 		return fmt.Errorf("no DNS addresses specified in config")
@@ -233,44 +233,46 @@ func changeDNS(forceChange bool) error {
 
 	_, currentIdx := appState.GetCurrentDNS()
 
-	// If no DNS is set yet (first time), just set the first one without testing
-	if currentIdx < 0 || currentIdx >= len(config.DNSAddresses) {
-		currentIdx = 0
-		currentDNS := config.DNSAddresses[currentIdx]
-		// Apply DNS immediately without testing on first run
-		return applyDNS(currentDNS, currentIdx)
-	}
-
-	currentDNS := config.DNSAddresses[currentIdx]
-	nextIndex := (currentIdx + 1) % len(config.DNSAddresses)
-	nextDNS := config.DNSAddresses[nextIndex]
-
-	// If force change, skip latency testing and switch immediately
+	// If force change, skip latency testing and switch to next DNS immediately
 	if forceChange {
-		appState.AddLog(fmt.Sprintf("Force changing DNS from %s to %s", currentDNS, nextDNS))
+		if currentIdx < 0 || currentIdx >= len(config.DNSAddresses) {
+			currentIdx = 0
+		}
+		nextIndex := (currentIdx + 1) % len(config.DNSAddresses)
+		nextDNS := config.DNSAddresses[nextIndex]
+		appState.AddLog(fmt.Sprintf("Force changing DNS to %s", nextDNS))
 		return applyDNS(nextDNS, nextIndex)
 	}
 
-	// Smart switching: Test current vs next DNS before switching (only for automatic changes)
+	// Smart switching: Test all DNS servers and use the one with lowest latency
+	// This applies to both service start and automatic timer-based changes
 	testDomains := config.TestDomains
 	if len(testDomains) == 0 {
 		testDomains = defaultTestDomains
 	}
 
-	betterDNS, betterIdx, shouldSwitch := compareDNS(currentDNS, currentIdx, nextDNS, nextIndex, testDomains)
+	bestDNS, bestIdx := findBestDNS(config.DNSAddresses, testDomains)
 
-	if !shouldSwitch {
-		appState.AddLog(fmt.Sprintf("Keeping current DNS (%s) - it performs better than next DNS (%s)", currentDNS, nextDNS))
-		// Still apply the current DNS to ensure it's set
-		return applyDNS(betterDNS, betterIdx)
+	if bestIdx < 0 {
+		// Fallback: use first DNS if all tests failed
+		bestDNS = config.DNSAddresses[0]
+		bestIdx = 0
+		appState.AddLog(fmt.Sprintf("Using fallback DNS: %s", bestDNS))
+	} else {
+		// Check if we're switching from current DNS
+		if currentIdx >= 0 && currentIdx < len(config.DNSAddresses) {
+			currentDNS := config.DNSAddresses[currentIdx]
+			if bestDNS != currentDNS {
+				appState.AddLog(fmt.Sprintf("Switching from %s to %s (better performance)", currentDNS, bestDNS))
+			} else {
+				appState.AddLog(fmt.Sprintf("Keeping current DNS (%s) - it's the best performing", bestDNS))
+			}
+		} else {
+			appState.AddLog(fmt.Sprintf("Setting DNS to %s (best performing)", bestDNS))
+		}
 	}
 
-	// Switch to better DNS
-	appState.AddLog(fmt.Sprintf("Switching from %s to %s (better performance)", currentDNS, betterDNS))
-	currentDNS = betterDNS
-	currentIdx = betterIdx
-
-	return applyDNS(currentDNS, currentIdx)
+	return applyDNS(bestDNS, bestIdx)
 }
 
 // applyDNS applies the DNS settings to the system

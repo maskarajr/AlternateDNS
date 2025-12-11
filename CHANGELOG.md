@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to this enhanced version of AlternateDNS will be documented in this file.
+All notable changes to AlternateDNS will be documented in this file.
 
-## Enhanced Features (This Fork)
+## New Features
 
 ### GUI and User Experience
 - Added modern desktop GUI using Fyne framework
@@ -35,7 +35,7 @@ All notable changes to this enhanced version of AlternateDNS will be documented 
 - Improved code organization (separated GUI, state, and DNS testing logic)
 - Enhanced configuration management
 
-## Original Features (by MaxIsJoe)
+## Original Features
 
 - Periodic DNS rotation
 - Cross-platform support
@@ -43,8 +43,3 @@ All notable changes to this enhanced version of AlternateDNS will be documented 
 - Startup registration
 - Notification support
 - YAML configuration
-
----
-
-**Note:** This changelog documents enhancements made in this fork. All original functionality and code structure are credited to [MaxIsJoe](https://github.com/MaxIsJoe).
-

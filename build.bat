@@ -9,15 +9,47 @@ if errorlevel 1 goto :no_gcc
 
 echo C compiler found!
 echo.
+
+REM Check for windres (resource compiler) and compile icon
+where windres >nul 2>&1
+if errorlevel 1 (
+    echo Warning: windres not found. Executable will build without Explorer icon.
+    echo To fix: windres comes with MinGW-w64. Make sure it's in your PATH.
+    echo The app will still work, just without the icon in Explorer.
+) else (
+    echo Compiling icon resource...
+    windres -o icon.syso icon.rc
+    if errorlevel 1 (
+        echo Warning: Failed to compile icon resource. Building without icon.
+    ) else (
+        echo Icon resource compiled successfully.
+    )
+)
+
+echo.
 echo Starting build (this may take a minute)...
 echo.
+
+REM Create dist folder if it doesn't exist
+if not exist "dist" mkdir dist
+
 set CGO_ENABLED=1
-go build -ldflags="-s -w -H windowsgui" -o AlternateDNS.exe
+go build -ldflags="-s -w -H windowsgui" -o dist\AlternateDNS.exe
+
+REM Clean up resource file after build
+if exist "icon.syso" del "icon.syso"
 if errorlevel 1 goto :build_failed
 
-echo Build successful! AlternateDNS.exe created.
+REM Copy default_config.yaml to dist folder for reference
+if exist "default_config.yaml" (
+    copy /Y "default_config.yaml" "dist\default_config.yaml" >nul
+    echo Copied default_config.yaml to dist folder for reference
+)
+
+echo.
+echo Build successful! dist\AlternateDNS.exe created.
 echo File size:
-dir AlternateDNS.exe | findstr AlternateDNS.exe
+dir dist\AlternateDNS.exe | findstr AlternateDNS.exe
 echo.
 pause
 exit /b 0

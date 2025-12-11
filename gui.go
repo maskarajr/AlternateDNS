@@ -708,7 +708,9 @@ func startUpdateTimer() {
 
 func showWindow() {
 	if mainWindow != nil {
-		mainWindow.Show()
-		mainWindow.RequestFocus()
+		fyne.Do(func() {
+			mainWindow.Show()
+			mainWindow.RequestFocus()
+		})
 	}
 }
