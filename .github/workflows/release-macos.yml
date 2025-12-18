@@ -102,6 +102,11 @@ jobs:
           echo "Commit: ${{ steps.commit.outputs.commit }}"
           echo "Build Date: ${{ steps.date.outputs.date }}"
           
+          # Workaround for duplicate symbol conflict between getlantern/systray and fyne.io/systray
+          # Both define Objective-C MenuItem classes. Use flat namespace to allow duplicate symbols.
+          # This is safe because we only use getlantern/systray, not fyne.io/systray directly
+          export CGO_LDFLAGS="-Wl,-flat_namespace"
+          
           if ! go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS 2>&1; then
             echo "ERROR: Build failed!"
             exit 1
