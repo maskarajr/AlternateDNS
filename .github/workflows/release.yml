@@ -15,26 +15,6 @@ jobs:
             goarch: amd64
             ext: .exe
             artifact: AlternateDNS-windows-amd64.exe
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            ext: ''
-            artifact: AlternateDNS-linux-amd64
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            ext: ''
-            artifact: AlternateDNS-linux-arm64
-          - os: macos-latest
-            goos: darwin
-            goarch: amd64
-            ext: ''
-            artifact: AlternateDNS-macos-amd64
-          - os: macos-latest
-            goos: darwin
-            goarch: arm64
-            ext: ''
-            artifact: AlternateDNS-macos-arm64
 
     runs-on: ${{ matrix.os }}
     
@@ -49,28 +29,42 @@ jobs:
         with:
           go-version: '1.22.3'
 
-      - name: Install X11 development libraries (Linux only)
-        if: matrix.goos == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev xorg-dev libayatana-appindicator3-dev gcc-aarch64-linux-gnu
-
       - name: Get version from tag
         id: version
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: Failed to extract version from tag: $GITHUB_REF"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
       - name: Get commit hash
         id: commit
         run: |
-          COMMIT=$(git rev-parse --short HEAD)
+          if ! COMMIT=$(git rev-parse --short HEAD 2>&1); then
+            echo "ERROR: Failed to get commit hash: $COMMIT"
+            exit 1
+          fi
+          if [ -z "$COMMIT" ]; then
+            echo "WARNING: Commit hash is empty, using 'unknown'"
+            COMMIT="unknown"
+          fi
           echo "commit=$COMMIT" >> $GITHUB_OUTPUT
           echo "Commit: $COMMIT"
 
       - name: Get build date
         id: date
         run: |
-          DATE=$(date -u +'%Y-%m-%d')
+          if ! DATE=$(date -u +'%Y-%m-%d' 2>&1); then
+            echo "ERROR: Failed to get build date: $DATE"
+            exit 1
+          fi
+          if [ -z "$DATE" ]; then
+            echo "WARNING: Build date is empty, using fallback"
+            DATE=$(date +'%Y-%m-%d')
+          fi
           echo "date=$DATE" >> $GITHUB_OUTPUT
           echo "Build Date: $DATE"
 
@@ -83,7 +77,27 @@ jobs:
       - name: Compile icon resource (Windows only)
         if: matrix.os == 'windows'
         run: |
-          windres -o icon.syso icon.rc || echo "Warning: Failed to compile icon resource"
+          if [ ! -f "icon.rc" ]; then
+            echo "Warning: icon.rc not found, skipping icon compilation"
+            exit 0
+          fi
+          
+          if [ ! -f "icon.ico" ]; then
+            echo "Warning: icon.ico not found, skipping icon compilation"
+            exit 0
+          fi
+          
+          echo "Compiling icon resource..."
+          if ! windres -o icon.syso icon.rc 2>&1; then
+            echo "Warning: Failed to compile icon resource (build will continue without icon)"
+            rm -f icon.syso
+          else
+            if [ -f "icon.syso" ]; then
+              echo "Icon resource compiled successfully"
+            else
+              echo "Warning: icon.syso was not created"
+            fi
+          fi
 
       - name: Build
         env:
@@ -94,22 +108,56 @@ jobs:
           GIT_COMMIT: ${{ steps.commit.outputs.commit }}
           BUILD_DATE: ${{ steps.date.outputs.date }}
         run: |
-          if [ "${{ matrix.os }}" == "windows" ]; then
-            go build -ldflags="-s -w -H windowsgui -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS${{ matrix.ext }}
-          elif [ "${{ matrix.goarch }}" == "arm64" ] && [ "${{ matrix.goos }}" == "linux" ]; then
-            # Cross-compile for ARM64 Linux
-            CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS${{ matrix.ext }}
-          else
-            go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS${{ matrix.ext }}
+          echo "Building AlternateDNS for ${{ matrix.goos }}/${{ matrix.goarch }}..."
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo "Commit: ${{ steps.commit.outputs.commit }}"
+          echo "Build Date: ${{ steps.date.outputs.date }}"
+          
+          if ! go build -ldflags="-s -w -H windowsgui -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS${{ matrix.ext }} 2>&1; then
+            echo "ERROR: Build failed!"
+            echo "Exit code: $?"
+            exit 1
           fi
+          
+          if [ ! -f "AlternateDNS${{ matrix.ext }}" ]; then
+            echo "ERROR: Build completed but executable not found!"
+            exit 1
+          fi
+          
+          echo "Build successful! File size:"
+          ls -lh AlternateDNS${{ matrix.ext }}
 
       - name: Create release directory
         run: |
           mkdir -p release
-          cp AlternateDNS${{ matrix.ext }} release/${{ matrix.artifact }}
-          if [ -f "default_config.yaml" ]; then
-            cp default_config.yaml release/
+          
+          if [ ! -f "AlternateDNS${{ matrix.ext }}" ]; then
+            echo "ERROR: Executable not found: AlternateDNS${{ matrix.ext }}"
+            exit 1
           fi
+          
+          if ! cp AlternateDNS${{ matrix.ext }} release/${{ matrix.artifact }}; then
+            echo "ERROR: Failed to copy executable to release directory"
+            exit 1
+          fi
+          
+          if [ ! -f "release/${{ matrix.artifact }}" ]; then
+            echo "ERROR: File copy verification failed"
+            exit 1
+          fi
+          
+          if [ -f "default_config.yaml" ]; then
+            if cp default_config.yaml release/; then
+              echo "Copied default_config.yaml to release directory"
+            else
+              echo "Warning: Failed to copy default_config.yaml"
+            fi
+          else
+            echo "Info: default_config.yaml not found (will use embedded config)"
+          fi
+          
+          echo "Release directory contents:"
+          ls -lh release/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -141,6 +189,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          
+      - name: Verify artifacts downloaded
+        run: |
+          if [ ! -d "artifacts" ]; then
+            echo "ERROR: Artifacts directory not found"
+            exit 1
+          fi
+          
+          ARTIFACT_COUNT=$(find artifacts -name "AlternateDNS-*" -type f 2>/dev/null | wc -l)
+          if [ "$ARTIFACT_COUNT" -eq 0 ]; then
+            echo "ERROR: No artifacts found in artifacts directory"
+            exit 1
+          fi
+          
+          echo "Found $ARTIFACT_COUNT artifact(s):"
+          find artifacts -name "AlternateDNS-*" -type f -exec ls -lh {} \;
 
       - name: Prepare release files
         run: |
@@ -154,6 +218,12 @@ jobs:
           
           # Create archives for each platform
           cd release
+          
+          if [ ! -d "." ] || [ -z "$(ls -A AlternateDNS-* 2>/dev/null)" ]; then
+            echo "ERROR: No binaries found in release directory"
+            exit 1
+          fi
+          
           for file in AlternateDNS-*; do
             if [ -f "$file" ] && [[ "$file" != *.sha256 ]] && [[ "$file" != *.zip ]] && [[ "$file" != *.tar.gz ]]; then
               # Get platform name from filename
@@ -163,34 +233,71 @@ jobs:
               if [[ "$file" == *.exe ]]; then
                 # Windows: use zip
                 ARCHIVE_NAME="AlternateDNS-${PLATFORM}.zip"
-                zip "$ARCHIVE_NAME" "$file"
-                if [ -f "default_config.yaml" ]; then
-                  zip -u "$ARCHIVE_NAME" default_config.yaml
+                echo "Creating archive: $ARCHIVE_NAME"
+                
+                if ! zip "$ARCHIVE_NAME" "$file"; then
+                  echo "ERROR: Failed to create zip archive: $ARCHIVE_NAME"
+                  exit 1
                 fi
+                
+                if [ -f "default_config.yaml" ]; then
+                  if ! zip -u "$ARCHIVE_NAME" default_config.yaml; then
+                    echo "WARNING: Failed to add default_config.yaml to archive"
+                  fi
+                fi
+                
                 CHECKSUM_FILE="${ARCHIVE_NAME}.sha256"
               else
-                # Linux/macOS: use tar.gz
+                # Linux/macOS: use tar.gz (for future use)
                 ARCHIVE_NAME="AlternateDNS-${PLATFORM}.tar.gz"
+                echo "Creating archive: $ARCHIVE_NAME"
+                
                 if [ -f "default_config.yaml" ]; then
-                  tar -czf "$ARCHIVE_NAME" "$file" default_config.yaml
+                  if ! tar -czf "$ARCHIVE_NAME" "$file" default_config.yaml; then
+                    echo "ERROR: Failed to create tar.gz archive: $ARCHIVE_NAME"
+                    exit 1
+                  fi
                 else
-                  tar -czf "$ARCHIVE_NAME" "$file"
+                  if ! tar -czf "$ARCHIVE_NAME" "$file"; then
+                    echo "ERROR: Failed to create tar.gz archive: $ARCHIVE_NAME"
+                    exit 1
+                  fi
                 fi
+                
                 CHECKSUM_FILE="${ARCHIVE_NAME}.sha256"
+              fi
+              
+              if [ ! -f "$ARCHIVE_NAME" ]; then
+                echo "ERROR: Archive was not created: $ARCHIVE_NAME"
+                exit 1
               fi
               
               # Create checksum for archive
               if [[ "$OSTYPE" == "darwin"* ]]; then
-                shasum -a 256 "$ARCHIVE_NAME" > "$CHECKSUM_FILE"
+                if ! shasum -a 256 "$ARCHIVE_NAME" > "$CHECKSUM_FILE"; then
+                  echo "ERROR: Failed to create checksum file"
+                  exit 1
+                fi
               else
-                sha256sum "$ARCHIVE_NAME" > "$CHECKSUM_FILE"
+                if ! sha256sum "$ARCHIVE_NAME" > "$CHECKSUM_FILE"; then
+                  echo "ERROR: Failed to create checksum file"
+                  exit 1
+                fi
               fi
               
               # Remove individual binary (keep only archive)
               rm "$file"
+              echo "Created: $ARCHIVE_NAME ($(du -h "$ARCHIVE_NAME" | cut -f1))"
             fi
           done
+          
+          echo "Final release files:"
           ls -lh
+          
+          if [ -z "$(ls -A *.zip *.tar.gz 2>/dev/null)" ]; then
+            echo "ERROR: No archives were created!"
+            exit 1
+          fi
 
       - name: Generate release notes
         id: notes
@@ -234,6 +341,32 @@ jobs:
           echo "Generated release notes:"
           cat release_notes.txt
 
+      - name: Verify release files before upload
+        run: |
+          if [ ! -d "release" ]; then
+            echo "ERROR: Release directory not found"
+            exit 1
+          fi
+          
+          FILE_COUNT=$(find release -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.sha256" \) | wc -l)
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "ERROR: No release files found in release directory"
+            exit 1
+          fi
+          
+          echo "Release files to upload ($FILE_COUNT files):"
+          find release -type f -exec ls -lh {} \;
+          
+          # Verify checksums exist for all archives
+          for archive in release/*.zip release/*.tar.gz; do
+            if [ -f "$archive" ]; then
+              CHECKSUM="${archive}.sha256"
+              if [ ! -f "$CHECKSUM" ]; then
+                echo "WARNING: Missing checksum for $archive"
+              fi
+            fi
+          done
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -244,4 +377,9 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+      - name: Verify release created
+        run: |
+          echo "Release v${{ steps.version.outputs.version }} created successfully!"
+          echo "Check https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}"
 
