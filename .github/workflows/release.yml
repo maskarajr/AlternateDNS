@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - 'v*'  # Triggers on tags like v1.0.0, v2.1.0, etc.
+  workflow_dispatch:  # Allows manual triggering
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        type: string
+        default: 'v1.0.0'
 
 jobs:
   build:
@@ -33,9 +40,17 @@ jobs:
         id: version
         shell: bash
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          # Handle manual dispatch with input, or extract from tag
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            # Remove 'v' prefix if present
+            VERSION=${VERSION#v}
+          else
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
+          
           if [ -z "$VERSION" ]; then
-            echo "ERROR: Failed to extract version from tag: $GITHUB_REF"
+            echo "ERROR: Failed to extract version"
             exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -244,8 +259,21 @@ jobs:
 
       - name: Get version from tag
         id: version
+        shell: bash
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          # Handle manual dispatch with input, or extract from tag
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            # Remove 'v' prefix if present
+            VERSION=${VERSION#v}
+          else
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
+          
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: Failed to extract version"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
@@ -450,8 +478,15 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: release/*
+          tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
-          body: ${{ steps.notes.outputs.notes }}
+          body: |
+            ## Windows Builds
+            
+            This release includes Windows builds for the following architectures:
+            - amd64 (x86_64)
+            
+            ${{ steps.notes.outputs.notes }}
           draft: false
           prerelease: false
         env:
