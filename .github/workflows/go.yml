@@ -1,4 +1,4 @@
-# This workflow will build a golang project
+# This workflow will build and test a golang project
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
 
 name: Go
@@ -11,7 +11,6 @@ on:
     branches: [ "master" ]
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
     steps:
@@ -25,6 +24,28 @@ jobs:
       with:
         go-version: '1.22.3'
 
+    - name: Verify Go installation
+      run: |
+        go version
+        go env
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Run go fmt check
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "Code is not formatted. Run 'go fmt ./...'"
+          gofmt -s -d .
+          exit 1
+        fi
+
     - name: Build
       env:
         CGO_ENABLED: 1
@@ -33,4 +54,87 @@ jobs:
     - name: Test
       env:
         CGO_ENABLED: 1
-      run: xvfb-run -a go test -v ./...
+      run: xvfb-run -a go test -v -race -coverprofile=coverage.out ./...
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  test-multi-platform:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.22.3'
+
+    - name: Install dependencies (Linux only)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libx11-dev \
+          libxi-dev \
+          libxrandr-dev \
+          libxcursor-dev \
+          libxinerama-dev \
+          libxkbcommon-dev \
+          libgl1-mesa-dev \
+          xorg-dev \
+          xvfb \
+          libayatana-appindicator3-dev
+
+    - name: Verify Go installation
+      run: |
+        go version
+        go env
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build
+      env:
+        CGO_ENABLED: 1
+      run: |
+        if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
+          xvfb-run -a go build -v ./...
+        else
+          go build -v ./...
+        fi
+
+    - name: Test
+      env:
+        CGO_ENABLED: 1
+      run: |
+        if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
+          xvfb-run -a go test -v -race ./...
+        else
+          go test -v -race ./...
+        fi
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22.3'
+      
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout=5m

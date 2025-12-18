@@ -1,0 +1,355 @@
+name: Release Linux
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on tags like v1.0.0, v2.1.0, etc.
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            artifact: AlternateDNS-linux-amd64
+
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22.3'
+
+      - name: Install X11 development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libgl1-mesa-dev \
+            xorg-dev \
+            xvfb \
+            libayatana-appindicator3-dev
+
+      - name: Get version from tag
+        id: version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: Failed to extract version from tag: $GITHUB_REF"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Get commit hash
+        id: commit
+        shell: bash
+        run: |
+          if ! COMMIT=$(git rev-parse --short HEAD 2>&1); then
+            echo "ERROR: Failed to get commit hash: $COMMIT"
+            exit 1
+          fi
+          if [ -z "$COMMIT" ]; then
+            echo "WARNING: Commit hash is empty, using 'unknown'"
+            COMMIT="unknown"
+          fi
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "Commit: $COMMIT"
+
+      - name: Get build date
+        id: date
+        shell: bash
+        run: |
+          if ! DATE=$(date -u +'%Y-%m-%d' 2>&1); then
+            echo "ERROR: Failed to get build date: $DATE"
+            exit 1
+          fi
+          if [ -z "$DATE" ]; then
+            echo "WARNING: Build date is empty, using fallback"
+            DATE=$(date +'%Y-%m-%d')
+          fi
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          echo "Build Date: $DATE"
+
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
+          GIT_COMMIT: ${{ steps.commit.outputs.commit }}
+          BUILD_DATE: ${{ steps.date.outputs.date }}
+        shell: bash
+        run: |
+          echo "Building AlternateDNS for ${{ matrix.goos }}/${{ matrix.goarch }}..."
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo "Commit: ${{ steps.commit.outputs.commit }}"
+          echo "Build Date: ${{ steps.date.outputs.date }}"
+          
+          if ! xvfb-run -a go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS 2>&1; then
+            echo "ERROR: Build failed!"
+            exit 1
+          fi
+          
+          if [ ! -f "AlternateDNS" ]; then
+            echo "ERROR: Build completed but executable not found!"
+            exit 1
+          fi
+          
+          # Make executable
+          chmod +x AlternateDNS
+          
+          echo "Build successful! File size:"
+          ls -lh AlternateDNS
+
+      - name: Create release directory
+        shell: bash
+        run: |
+          mkdir -p release
+          
+          if [ ! -f "AlternateDNS" ]; then
+            echo "ERROR: Executable not found: AlternateDNS"
+            exit 1
+          fi
+          
+          if ! cp AlternateDNS release/${{ matrix.artifact }}; then
+            echo "ERROR: Failed to copy executable to release directory"
+            exit 1
+          fi
+          
+          chmod +x release/${{ matrix.artifact }}
+          
+          if [ ! -f "release/${{ matrix.artifact }}" ]; then
+            echo "ERROR: File copy verification failed"
+            exit 1
+          fi
+          
+          if [ -f "default_config.yaml" ]; then
+            if cp default_config.yaml release/; then
+              echo "Copied default_config.yaml to release directory"
+            else
+              echo "Warning: Failed to copy default_config.yaml"
+            fi
+          else
+            echo "Info: default_config.yaml not found (will use embedded config)"
+          fi
+          
+          echo "Release directory contents:"
+          ls -lh release/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/${{ matrix.artifact }}
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Get build date
+        id: date
+        shell: bash
+        run: |
+          if ! DATE=$(date -u +'%Y-%m-%d' 2>&1); then
+            echo "ERROR: Failed to get build date: $DATE"
+            exit 1
+          fi
+          if [ -z "$DATE" ]; then
+            echo "WARNING: Build date is empty, using fallback"
+            DATE=$(date +'%Y-%m-%d')
+          fi
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          echo "Build Date: $DATE"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Verify artifacts downloaded
+        run: |
+          if [ ! -d "artifacts" ]; then
+            echo "ERROR: Artifacts directory not found"
+            exit 1
+          fi
+          
+          ARTIFACT_COUNT=$(find artifacts -name "AlternateDNS-linux-*" -type f 2>/dev/null | wc -l)
+          if [ "$ARTIFACT_COUNT" -eq 0 ]; then
+            echo "ERROR: No Linux artifacts found in artifacts directory"
+            exit 1
+          fi
+          
+          echo "Found $ARTIFACT_COUNT artifact(s):"
+          find artifacts -name "AlternateDNS-linux-*" -type f -exec ls -lh {} \;
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          
+          # Copy all binaries
+          find artifacts -name "AlternateDNS-linux-*" -type f -exec cp {} release/ \;
+          
+          # Copy config file if it exists
+          if [ -f "default_config.yaml" ]; then
+            cp default_config.yaml release/
+          fi
+          
+          # Create archives for each platform
+          cd release
+          
+          if [ ! -d "." ] || [ -z "$(ls -A AlternateDNS-linux-* 2>/dev/null)" ]; then
+            echo "ERROR: No binaries found in release directory"
+            exit 1
+          fi
+          
+          for file in AlternateDNS-linux-*; do
+            if [ -f "$file" ] && [[ "$file" != *.sha256 ]] && [[ "$file" != *.tar.gz ]]; then
+              # Get platform name from filename
+              PLATFORM=$(echo "$file" | sed 's/AlternateDNS-\(.*\)/\1/')
+              
+              # Linux: use tar.gz
+              ARCHIVE_NAME="AlternateDNS-${PLATFORM}.tar.gz"
+              echo "Creating archive: $ARCHIVE_NAME"
+              
+              if [ -f "default_config.yaml" ]; then
+                if ! tar -czf "$ARCHIVE_NAME" "$file" default_config.yaml; then
+                  echo "ERROR: Failed to create tar.gz archive: $ARCHIVE_NAME"
+                  exit 1
+                fi
+              else
+                if ! tar -czf "$ARCHIVE_NAME" "$file"; then
+                  echo "ERROR: Failed to create tar.gz archive: $ARCHIVE_NAME"
+                  exit 1
+                fi
+              fi
+              
+              if [ ! -f "$ARCHIVE_NAME" ]; then
+                echo "ERROR: Archive was not created: $ARCHIVE_NAME"
+                exit 1
+              fi
+              
+              # Create checksum for archive
+              if ! sha256sum "$ARCHIVE_NAME" > "${ARCHIVE_NAME}.sha256"; then
+                echo "ERROR: Failed to create checksum file"
+                exit 1
+              fi
+              
+              # Remove individual binary (keep only archive)
+              rm "$file"
+              echo "Created: $ARCHIVE_NAME ($(du -h "$ARCHIVE_NAME" | cut -f1))"
+            fi
+          done
+          
+          echo "Final release files:"
+          ls -lh
+          
+          if [ -z "$(ls -A *.tar.gz 2>/dev/null)" ]; then
+            echo "ERROR: No archives were created!"
+            exit 1
+          fi
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          RELEASE_DATE=${{ steps.date.outputs.date }}
+          
+          {
+            echo "# v${VERSION} Linux Release"
+            echo ""
+            echo "**Release date:** ${RELEASE_DATE}"
+            echo ""
+            echo "## Linux Builds"
+            echo ""
+            echo "This release includes Linux builds for the following architectures:"
+            echo "- amd64 (x86_64)"
+            echo ""
+            
+            if [ -f "CHANGELOG.md" ]; then
+              awk -v version="$VERSION" '
+                BEGIN { in_section=0; found=0 }
+                /^## \[/ {
+                  if (in_section) exit
+                  if ($0 ~ "\\[" version "\\]") {
+                    in_section=1
+                    found=1
+                    next
+                  }
+                }
+                in_section && /^## \[/ { exit }
+                in_section { print }
+                END { if (!found) print "See [CHANGELOG.md](CHANGELOG.md) for details." }
+              ' CHANGELOG.md | sed 's/^## \[.*\] - .*$//' | sed '/^$/N;/^\n$/d'
+            else
+              echo "See [CHANGELOG.md](CHANGELOG.md) for details."
+            fi
+          } > release_notes.txt
+          
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          cat release_notes.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "Generated release notes:"
+          cat release_notes.txt
+
+      - name: Verify release files before upload
+        run: |
+          if [ ! -d "release" ]; then
+            echo "ERROR: Release directory not found"
+            exit 1
+          fi
+          
+          FILE_COUNT=$(find release -type f \( -name "*.tar.gz" -o -name "*.sha256" \) | wc -l)
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "ERROR: No release files found in release directory"
+            exit 1
+          fi
+          
+          echo "Release files to upload ($FILE_COUNT files):"
+          find release -type f -exec ls -lh {} \;
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          name: v${{ steps.version.outputs.version }} (Linux)
+          body: ${{ steps.notes.outputs.notes }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify release created
+        run: |
+          echo "Linux release v${{ steps.version.outputs.version }} created successfully!"
+
