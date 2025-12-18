@@ -49,6 +49,10 @@ jobs:
         with:
           go-version: '1.22.3'
 
+      - name: Install X11 development libraries (Linux only)
+        if: matrix.goos == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev xorg-dev
+
       - name: Get version from tag
         id: version
         run: |
