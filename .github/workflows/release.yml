@@ -76,76 +76,61 @@ jobs:
         uses: egor-tensin/setup-mingw@v2
         with:
           platform: x64
+        continue-on-error: true
 
-      - name: Ensure MinGW has pthread library
+      - name: Verify MinGW pthread library
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          # Primary path where Chocolatey installs MinGW pthread library
+          # Primary path where Chocolatey installs MinGW pthread library (after setup-mingw action)
           PTHREAD_PATH="/c/ProgramData/mingw64/mingw64/x86_64-w64-mingw32/lib/libpthread.dll.a"
+          
+          # Refresh PATH to include MinGW bin directory
+          export PATH="/c/ProgramData/mingw64/mingw64/bin:$PATH"
           
           # Check if pthread library exists at primary location
           if [ -f "$PTHREAD_PATH" ]; then
-            echo "Found pthread library at: $PTHREAD_PATH"
-          else
-            echo "pthread library not found at expected location: $PTHREAD_PATH"
-            echo "Attempting to install via chocolatey..."
-            
-            # Check if chocolatey is available
-            if command -v choco &> /dev/null; then
-              echo "Installing mingw via chocolatey..."
-              choco install mingw --version=11.2.0 --force -y 2>&1 || choco install mingw -y 2>&1 || true
-              
-              # Refresh PATH to include newly installed MinGW
-              export PATH="/c/ProgramData/mingw64/mingw64/bin:$PATH"
-              
-              # Check again after installation
-              if [ -f "$PTHREAD_PATH" ]; then
-                echo "Found pthread library after installation at: $PTHREAD_PATH"
-              else
-                echo "ERROR: pthread library still not found after chocolatey installation"
-                echo "Expected location: $PTHREAD_PATH"
-                echo ""
-                echo "Checking alternative locations..."
-                
-                # Fallback: check other common locations
-                ALTERNATIVE_PATHS=(
-                  "/c/ProgramData/mingw64/mingw64/lib/libpthread.dll.a"
-                  "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/x86_64-w64-mingw32/lib/libpthread.dll.a"
-                  "/c/msys64/mingw64/x86_64-w64-mingw32/lib/libpthread.dll.a"
-                )
-                
-                FOUND=false
-                for alt_path in "${ALTERNATIVE_PATHS[@]}"; do
-                  if [ -f "$alt_path" ]; then
-                    echo "Found pthread library at alternative location: $alt_path"
-                    FOUND=true
-                    break
-                  fi
-                done
-                
-                if [ "$FOUND" = false ]; then
-                  echo "ERROR: Cannot locate libpthread.dll.a required for CGO builds"
-                  echo "This library is required by Fyne GUI framework for Windows builds"
-                  echo ""
-                  echo "Searched locations:"
-                  echo "  ✗ $PTHREAD_PATH (primary)"
-                  for alt_path in "${ALTERNATIVE_PATHS[@]}"; do
-                    echo "  ✗ $alt_path"
-                  done
-                  echo ""
-                  echo "Possible solutions:"
-                  echo "1. The egor-tensin/setup-mingw action may need updating"
-                  echo "2. Consider switching to msys2/setup-msys2 action"
-                  echo "3. Manually install MinGW-w64 with pthread support"
-                  exit 1
-                fi
-              fi
-            else
-              echo "ERROR: Chocolatey not available, cannot install pthread library"
-              echo "Expected location: $PTHREAD_PATH"
-              exit 1
+            echo "✓ Found pthread library at: $PTHREAD_PATH"
+            echo "pthread library verification successful"
+            exit 0
+          fi
+          
+          echo "pthread library not found at expected location: $PTHREAD_PATH"
+          echo "Checking alternative locations..."
+          
+          # Fallback: check other common locations
+          ALTERNATIVE_PATHS=(
+            "/c/ProgramData/mingw64/mingw64/lib/libpthread.dll.a"
+            "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/x86_64-w64-mingw32/lib/libpthread.dll.a"
+            "/c/msys64/mingw64/x86_64-w64-mingw32/lib/libpthread.dll.a"
+          )
+          
+          FOUND=false
+          for alt_path in "${ALTERNATIVE_PATHS[@]}"; do
+            if [ -f "$alt_path" ]; then
+              echo "✓ Found pthread library at alternative location: $alt_path"
+              FOUND=true
+              break
             fi
+          done
+          
+          if [ "$FOUND" = false ]; then
+            echo "ERROR: Cannot locate libpthread.dll.a required for CGO builds"
+            echo "This library is required by Fyne GUI framework for Windows builds"
+            echo ""
+            echo "Searched locations:"
+            echo "  ✗ $PTHREAD_PATH (primary)"
+            for alt_path in "${ALTERNATIVE_PATHS[@]}"; do
+              echo "  ✗ $alt_path"
+            done
+            echo ""
+            echo "Note: The setup-mingw action may have installed MinGW but the pthread library"
+            echo "is missing. This is a known issue with some MinGW distributions."
+            echo ""
+            echo "Possible solutions:"
+            echo "1. The egor-tensin/setup-mingw action may need updating"
+            echo "2. Consider switching to msys2/setup-msys2 action"
+            exit 1
           fi
           
           echo "pthread library verification successful"
