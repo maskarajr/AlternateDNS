@@ -51,7 +51,7 @@ jobs:
 
       - name: Install X11 development libraries (Linux only)
         if: matrix.goos == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev xorg-dev
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev xorg-dev gcc-aarch64-linux-gnu
 
       - name: Get version from tag
         id: version
@@ -96,6 +96,9 @@ jobs:
         run: |
           if [ "${{ matrix.os }}" == "windows" ]; then
             go build -ldflags="-s -w -H windowsgui -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS${{ matrix.ext }}
+          elif [ "${{ matrix.goarch }}" == "arm64" ] && [ "${{ matrix.goos }}" == "linux" ]; then
+            # Cross-compile for ARM64 Linux
+            CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS${{ matrix.ext }}
           else
             go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS${{ matrix.ext }}
           fi
