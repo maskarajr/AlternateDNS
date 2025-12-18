@@ -107,6 +107,11 @@ jobs:
       env:
         CGO_ENABLED: 1
       run: |
+        # Workaround for duplicate symbol conflict on macOS
+        if [ "${{ matrix.os }}" == "macos-latest" ]; then
+          export CGO_LDFLAGS="-Wl,-flat_namespace"
+        fi
+        
         if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
           xvfb-run -a go build -v ./...
         else
@@ -117,6 +122,11 @@ jobs:
       env:
         CGO_ENABLED: 1
       run: |
+        # Workaround for duplicate symbol conflict on macOS
+        if [ "${{ matrix.os }}" == "macos-latest" ]; then
+          export CGO_LDFLAGS="-Wl,-flat_namespace"
+        fi
+        
         if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
           xvfb-run -a go test -v -race ./...
         else

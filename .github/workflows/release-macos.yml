@@ -15,6 +15,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false  # Don't cancel other builds if one fails
       matrix:
         include:
           - goos: darwin
@@ -101,20 +102,28 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           GIT_COMMIT: ${{ steps.commit.outputs.commit }}
           BUILD_DATE: ${{ steps.date.outputs.date }}
+          # Workaround for duplicate symbol conflict between getlantern/systray and fyne.io/systray
+          # Both define Objective-C MenuItem classes. Use flat namespace to allow duplicate symbols.
+          # This is safe because we only use getlantern/systray, not fyne.io/systray directly
+          CGO_LDFLAGS: "-Wl,-flat_namespace"
         shell: bash
+        timeout-minutes: 15
         run: |
           echo "Building AlternateDNS for ${{ matrix.goos }}/${{ matrix.goarch }}..."
           echo "Version: ${{ steps.version.outputs.version }}"
           echo "Commit: ${{ steps.commit.outputs.commit }}"
           echo "Build Date: ${{ steps.date.outputs.date }}"
+          echo "CGO_LDFLAGS: $CGO_LDFLAGS"
           
-          # Workaround for duplicate symbol conflict between getlantern/systray and fyne.io/systray
-          # Both define Objective-C MenuItem classes. Use flat namespace to allow duplicate symbols.
-          # This is safe because we only use getlantern/systray, not fyne.io/systray directly
-          export CGO_LDFLAGS="-Wl,-flat_namespace"
+          # Set build command with proper error handling
+          BUILD_CMD="go build -ldflags=\"-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}\" -o AlternateDNS"
           
-          if ! go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS 2>&1; then
+          echo "Running: $BUILD_CMD"
+          
+          if ! eval "$BUILD_CMD" 2>&1; then
             echo "ERROR: Build failed!"
+            echo "Build command: $BUILD_CMD"
+            echo "CGO_LDFLAGS: $CGO_LDFLAGS"
             exit 1
           fi
           
