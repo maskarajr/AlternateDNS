@@ -31,6 +31,7 @@ jobs:
 
       - name: Get version from tag
         id: version
+        shell: bash
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           if [ -z "$VERSION" ]; then
@@ -42,6 +43,7 @@ jobs:
 
       - name: Get commit hash
         id: commit
+        shell: bash
         run: |
           if ! COMMIT=$(git rev-parse --short HEAD 2>&1); then
             echo "ERROR: Failed to get commit hash: $COMMIT"
@@ -56,6 +58,7 @@ jobs:
 
       - name: Get build date
         id: date
+        shell: bash
         run: |
           if ! DATE=$(date -u +'%Y-%m-%d' 2>&1); then
             echo "ERROR: Failed to get build date: $DATE"
@@ -76,6 +79,7 @@ jobs:
 
       - name: Compile icon resource (Windows only)
         if: matrix.os == 'windows-latest'
+        shell: bash
         run: |
           if [ ! -f "icon.rc" ]; then
             echo "Warning: icon.rc not found, skipping icon compilation"
@@ -107,6 +111,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           GIT_COMMIT: ${{ steps.commit.outputs.commit }}
           BUILD_DATE: ${{ steps.date.outputs.date }}
+        shell: bash
         run: |
           echo "Building AlternateDNS for ${{ matrix.goos }}/${{ matrix.goarch }}..."
           echo "Version: ${{ steps.version.outputs.version }}"
@@ -128,6 +133,7 @@ jobs:
           ls -lh AlternateDNS${{ matrix.ext }}
 
       - name: Create release directory
+        shell: bash
         run: |
           mkdir -p release
           
@@ -187,6 +193,7 @@ jobs:
 
       - name: Get build date
         id: date
+        shell: bash
         run: |
           if ! DATE=$(date -u +'%Y-%m-%d' 2>&1); then
             echo "ERROR: Failed to get build date: $DATE"
