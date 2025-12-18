@@ -77,6 +77,65 @@ jobs:
         with:
           platform: x64
 
+      - name: Ensure MinGW has pthread library
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          # Common paths for pthread library
+          PTHREAD_PATHS=(
+            "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/x86_64-w64-mingw32/lib/libpthread.dll.a"
+            "/c/msys64/mingw64/x86_64-w64-mingw32/lib/libpthread.dll.a"
+            "/c/Program Files/mingw-w64/x86_64-8.1.0-posix-seh-rt_v6-rev0/mingw64/x86_64-w64-mingw32/lib/libpthread.dll.a"
+            "/c/tools/mingw64/x86_64-w64-mingw32/lib/libpthread.dll.a"
+          )
+          
+          FOUND=false
+          for path in "${PTHREAD_PATHS[@]}"; do
+            if [ -f "$path" ]; then
+              echo "Found pthread library at: $path"
+              FOUND=true
+              break
+            fi
+          done
+          
+          if [ "$FOUND" = false ]; then
+            echo "pthread library not found in common locations"
+            echo "Attempting to install via chocolatey..."
+            
+            # Check if chocolatey is available
+            if command -v choco &> /dev/null; then
+              echo "Installing mingw via chocolatey..."
+              choco install mingw --version=11.2.0 --force -y 2>&1 || choco install mingw -y 2>&1 || true
+              
+              # Check again after installation
+              for path in "${PTHREAD_PATHS[@]}"; do
+                if [ -f "$path" ]; then
+                  echo "Found pthread library after installation at: $path"
+                  FOUND=true
+                  break
+                fi
+              done
+            else
+              echo "WARNING: Chocolatey not available"
+            fi
+            
+            if [ "$FOUND" = false ]; then
+              echo "ERROR: Cannot locate libpthread.dll.a required for CGO builds"
+              echo "This library is required by Fyne GUI framework for Windows builds"
+              echo ""
+              echo "Tried paths:"
+              for path in "${PTHREAD_PATHS[@]}"; do
+                echo "  - $path"
+              done
+              echo ""
+              echo "Possible solutions:"
+              echo "1. The egor-tensin/setup-mingw action may need updating"
+              echo "2. Consider switching to msys2/setup-msys2 action"
+              echo "3. Manually install MinGW-w64 with pthread support"
+              exit 1
+            fi
+          fi
+
       - name: Compile icon resource (Windows only)
         if: matrix.os == 'windows-latest'
         shell: bash
