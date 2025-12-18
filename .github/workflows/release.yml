@@ -1,0 +1,240 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on tags like v1.0.0, v2.1.0, etc.
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            artifact: AlternateDNS-windows-amd64.exe
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ''
+            artifact: AlternateDNS-linux-amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            ext: ''
+            artifact: AlternateDNS-linux-arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ''
+            artifact: AlternateDNS-macos-amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ''
+            artifact: AlternateDNS-macos-arm64
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for git describe
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22.3'
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Get commit hash
+        id: commit
+        run: |
+          COMMIT=$(git rev-parse --short HEAD)
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "Commit: $COMMIT"
+
+      - name: Get build date
+        id: date
+        run: |
+          DATE=$(date -u +'%Y-%m-%d')
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          echo "Build Date: $DATE"
+
+      - name: Set up MinGW (Windows only)
+        if: matrix.os == 'windows'
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
+
+      - name: Compile icon resource (Windows only)
+        if: matrix.os == 'windows'
+        run: |
+          windres -o icon.syso icon.rc || echo "Warning: Failed to compile icon resource"
+
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
+          GIT_COMMIT: ${{ steps.commit.outputs.commit }}
+          BUILD_DATE: ${{ steps.date.outputs.date }}
+        run: |
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            go build -ldflags="-s -w -H windowsgui -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS${{ matrix.ext }}
+          else
+            go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }} -X main.GitCommit=${{ steps.commit.outputs.commit }} -X main.BuildDate=${{ steps.date.outputs.date }}" -o AlternateDNS${{ matrix.ext }}
+          fi
+
+      - name: Create release directory
+        run: |
+          mkdir -p release
+          cp AlternateDNS${{ matrix.ext }} release/${{ matrix.artifact }}
+          if [ -f "default_config.yaml" ]; then
+            cp default_config.yaml release/
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/${{ matrix.artifact }}
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          # Copy all binaries
+          find artifacts -name "AlternateDNS-*" -type f -exec cp {} release/ \;
+          # Copy config file if it exists
+          if [ -f "default_config.yaml" ]; then
+            cp default_config.yaml release/
+          fi
+          
+          # Create archives for each platform
+          cd release
+          for file in AlternateDNS-*; do
+            if [ -f "$file" ] && [[ "$file" != *.sha256 ]] && [[ "$file" != *.zip ]] && [[ "$file" != *.tar.gz ]]; then
+              # Get platform name from filename
+              PLATFORM=$(echo "$file" | sed 's/AlternateDNS-\(.*\)\.exe/\1/' | sed 's/AlternateDNS-\(.*\)/\1/')
+              
+              # Determine archive type based on platform
+              if [[ "$file" == *.exe ]]; then
+                # Windows: use zip
+                ARCHIVE_NAME="AlternateDNS-${PLATFORM}.zip"
+                zip "$ARCHIVE_NAME" "$file"
+                if [ -f "default_config.yaml" ]; then
+                  zip -u "$ARCHIVE_NAME" default_config.yaml
+                fi
+                CHECKSUM_FILE="${ARCHIVE_NAME}.sha256"
+              else
+                # Linux/macOS: use tar.gz
+                ARCHIVE_NAME="AlternateDNS-${PLATFORM}.tar.gz"
+                if [ -f "default_config.yaml" ]; then
+                  tar -czf "$ARCHIVE_NAME" "$file" default_config.yaml
+                else
+                  tar -czf "$ARCHIVE_NAME" "$file"
+                fi
+                CHECKSUM_FILE="${ARCHIVE_NAME}.sha256"
+              fi
+              
+              # Create checksum for archive
+              if [[ "$OSTYPE" == "darwin"* ]]; then
+                shasum -a 256 "$ARCHIVE_NAME" > "$CHECKSUM_FILE"
+              else
+                sha256sum "$ARCHIVE_NAME" > "$CHECKSUM_FILE"
+              fi
+              
+              # Remove individual binary (keep only archive)
+              rm "$file"
+            fi
+          done
+          ls -lh
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          RELEASE_DATE=${{ steps.date.outputs.date }}
+          
+          # Create release notes with title and date
+          {
+            echo "# v${VERSION} Stable Release"
+            echo ""
+            echo "**Release date:** ${RELEASE_DATE}"
+            echo ""
+            
+            # Extract version section from CHANGELOG.md if available
+            if [ -f "CHANGELOG.md" ]; then
+              # Extract content between version header and next version header
+              awk -v version="$VERSION" '
+                BEGIN { in_section=0; found=0 }
+                /^## \[/ {
+                  if (in_section) exit
+                  if ($0 ~ "\\[" version "\\]") {
+                    in_section=1
+                    found=1
+                    next
+                  }
+                }
+                in_section && /^## \[/ { exit }
+                in_section { print }
+                END { if (!found) print "See [CHANGELOG.md](CHANGELOG.md) for details." }
+              ' CHANGELOG.md | sed 's/^## \[.*\] - .*$//' | sed '/^$/N;/^\n$/d'
+            else
+              echo "See [CHANGELOG.md](CHANGELOG.md) for details."
+            fi
+          } > release_notes.txt
+          
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          cat release_notes.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "Generated release notes:"
+          cat release_notes.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          name: v${{ steps.version.outputs.version }}
+          body: ${{ steps.notes.outputs.notes }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

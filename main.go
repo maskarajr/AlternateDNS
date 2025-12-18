@@ -17,11 +17,12 @@ import (
 )
 
 type Config struct {
-	DNSAddresses        []string `yaml:"dns_addresses"`
-	RunOnStartup        bool     `yaml:"run_on_startup"`
-	ChangeIntervalHours int      `yaml:"change_interval_hours"`
-	NotifyUser          bool     `yaml:"notify_user"`
-	TestDomains         []string `yaml:"test_domains"` // Domains used for DNS latency testing
+	DNSAddresses          []string `yaml:"dns_addresses"`
+	RunOnStartup          bool     `yaml:"run_on_startup"`
+	ChangeIntervalHours   int      `yaml:"change_interval_hours"`   // Deprecated: kept for backward compatibility
+	ChangeIntervalMinutes int      `yaml:"change_interval_minutes"` // New: interval in minutes
+	NotifyUser            bool     `yaml:"notify_user"`
+	TestDomains           []string `yaml:"test_domains"` // Domains used for DNS latency testing
 }
 
 var config Config
@@ -151,9 +152,16 @@ func onReady() {
 // Tick is now handled by startTickerLoop in gui.go
 
 func onExit() {
-	// Stop service if running
+	// Stop service if running (this will restore DNS via stopService)
 	if appState.IsRunning() {
-		stopService()
+		// Restore DNS to automatic before exiting
+		restoreDNS()
+		appState.SetRunning(false)
+		ticker := appState.GetTicker()
+		if ticker != nil {
+			ticker.Stop()
+			appState.SetTicker(nil)
+		}
 	}
 	if appState.GetDebugMode() {
 		appState.AddLog("Exiting the application")
@@ -218,8 +226,16 @@ func readConfig() error {
 		return err
 	}
 
-	if config.ChangeIntervalHours <= 0 {
-		config.ChangeIntervalHours = 6
+	// Handle backward compatibility: convert hours to minutes if needed
+	if config.ChangeIntervalMinutes <= 0 {
+		if config.ChangeIntervalHours > 0 {
+			// Convert old hours format to minutes
+			config.ChangeIntervalMinutes = config.ChangeIntervalHours * 60
+			config.ChangeIntervalHours = 0 // Clear old value
+		} else {
+			// Default to 6 hours (360 minutes)
+			config.ChangeIntervalMinutes = 360
+		}
 	}
 	return nil
 }
@@ -273,6 +289,97 @@ func changeDNS(forceChange bool) error {
 	}
 
 	return applyDNS(bestDNS, bestIdx)
+}
+
+// restoreDNS restores DNS settings to automatic/DHCP
+func restoreDNS() error {
+	var allErrors []string
+
+	switch runtime.GOOS {
+	case "windows":
+		activeInterfaces, err := getActiveWindowsInterfaces()
+		if err != nil {
+			return err
+		}
+
+		targetInterfaces := activeInterfaces
+		selected := appState.GetSelectedInterface()
+		if selected != "" {
+			found := false
+			for _, iface := range activeInterfaces {
+				if iface == selected {
+					targetInterfaces = []string{selected}
+					found = true
+					break
+				}
+			}
+			if !found {
+				appState.AddLog(fmt.Sprintf("Selected interface %s not found, restoring DNS on all interfaces", selected))
+			}
+		}
+
+		if len(targetInterfaces) == 0 {
+			return fmt.Errorf("no active network interfaces available")
+		}
+
+		for _, iface := range targetInterfaces {
+			// Reset DNS to automatic (DHCP)
+			cmd := exec.Command("powershell", "Set-DnsClientServerAddress", "-InterfaceAlias", iface, "-ResetServerAddresses")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				errMsg := fmt.Sprintf("Error restoring DNS for interface %s: %v. Output: %s", iface, err, string(output))
+				allErrors = append(allErrors, errMsg)
+				appState.AddLog(errMsg)
+			} else {
+				appState.AddLog(fmt.Sprintf("Restored DNS to automatic (DHCP) for interface %s", iface))
+			}
+		}
+	case "linux":
+		// On Linux, we need to restore the original resolv.conf
+		// This is complex as we'd need to backup the original, so for now we'll just log
+		// The user may need to manually restore or restart network manager
+		appState.AddLog("Note: On Linux, DNS restoration may require manual intervention or network manager restart")
+		// Try to use systemd-resolved if available
+		cmd := exec.Command("sh", "-c", "systemctl is-active --quiet systemd-resolved && sudo systemctl restart systemd-resolved || true")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			errMsg := fmt.Sprintf("Note: Could not automatically restore DNS on Linux: %v. Output: %s", err, string(output))
+			appState.AddLog(errMsg)
+		} else {
+			appState.AddLog("Attempted to restore DNS via systemd-resolved")
+		}
+	case "darwin":
+		// macOS: Reset DNS to automatic
+		cmd := exec.Command("networksetup", "-setdnsservers", "Wi-Fi", "Empty")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			errMsg := fmt.Sprintf("Error restoring DNS on macOS: %v. Output: %s", err, string(output))
+			allErrors = append(allErrors, errMsg)
+			appState.AddLog(errMsg)
+		} else {
+			appState.AddLog("Restored DNS to automatic on macOS")
+		}
+	default:
+		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+
+	if len(allErrors) > 0 {
+		errorMsg := strings.Join(allErrors, "\n")
+		return fmt.Errorf("%s", errorMsg)
+	}
+
+	// Clear current DNS from state
+	appState.SetCurrentDNS("", -1)
+
+	// Update GUI if available
+	if mainWindow != nil {
+		fyne.Do(func() {
+			updateStatusDisplay()
+			updateLogsDisplay()
+		})
+	}
+
+	return nil
 }
 
 // applyDNS applies the DNS settings to the system
@@ -364,7 +471,11 @@ func applyDNS(currentDNS string, currentIdx int) error {
 	if appState.GetDebugMode() {
 		interval = 10 * time.Second
 	} else {
-		interval = time.Duration(config.ChangeIntervalHours) * time.Hour
+		intervalMinutes := config.ChangeIntervalMinutes
+		if intervalMinutes == 0 && config.ChangeIntervalHours > 0 {
+			intervalMinutes = config.ChangeIntervalHours * 60
+		}
+		interval = time.Duration(intervalMinutes) * time.Minute
 	}
 	appState.SetNextChangeTime(time.Now().Add(interval))
 
@@ -420,10 +531,10 @@ func generateDefaultConfig() error {
 	}
 
 	defaultConfig := Config{
-		DNSAddresses:        []string{"1.1.1.1", "1.0.0.1", "9.9.9.9"},
-		RunOnStartup:        true,
-		ChangeIntervalHours: 6,
-		NotifyUser:          true,
+		DNSAddresses:          []string{"1.1.1.1", "1.0.0.1", "9.9.9.9"},
+		RunOnStartup:          true,
+		ChangeIntervalMinutes: 360, // 6 hours default
+		NotifyUser:            true,
 	}
 
 	data, err := yaml.Marshal(&defaultConfig)

@@ -35,8 +35,6 @@ config.yaml
 
 # Build artifacts
 dist/*
-!dist/build.bat
-!dist/build.sh
 build/
 
 # Windows resource files
@@ -45,4 +43,3 @@ icon.syso
 
 # Setup guides (not for public)
 SETUP_GITHUB.md
-

@@ -32,7 +32,8 @@ var dnsAddBtn *widget.Button
 var dnsRemoveBtn *widget.Button
 var dnsUpBtn *widget.Button
 var dnsDownBtn *widget.Button
-var settingsIntervalEntry *widget.Entry
+var settingsIntervalHoursEntry *widget.Entry
+var settingsIntervalMinutesEntry *widget.Entry
 var settingsStartupCheck *widget.Check
 var settingsNotifyCheck *widget.Check
 var settingsDebugCheck *widget.Check
@@ -54,7 +55,7 @@ func setupGUI() {
 	iconResource := fyne.NewStaticResource("icon.ico", getEmbeddedIcon())
 	guiApp.SetIcon(iconResource)
 
-	mainWindow = guiApp.NewWindow("AlternateDNS")
+	mainWindow = guiApp.NewWindow(GetVersionString())
 	mainWindow.Resize(fyne.NewSize(600, 500))
 	mainWindow.CenterOnScreen()
 
@@ -229,10 +230,21 @@ func createDNSTab() fyne.CanvasObject {
 }
 
 func createSettingsTab() fyne.CanvasObject {
-	// Interval
-	settingsIntervalEntry = widget.NewEntry()
-	settingsIntervalEntry.SetText(fmt.Sprintf("%d", config.ChangeIntervalHours))
-	settingsIntervalEntry.SetPlaceHolder("Hours")
+	// Interval - Hours and Minutes
+	totalMinutes := config.ChangeIntervalMinutes
+	if totalMinutes == 0 && config.ChangeIntervalHours > 0 {
+		totalMinutes = config.ChangeIntervalHours * 60
+	}
+	hours := totalMinutes / 60
+	minutes := totalMinutes % 60
+
+	settingsIntervalHoursEntry = widget.NewEntry()
+	settingsIntervalHoursEntry.SetText(fmt.Sprintf("%d", hours))
+	settingsIntervalHoursEntry.SetPlaceHolder("Hours")
+
+	settingsIntervalMinutesEntry = widget.NewEntry()
+	settingsIntervalMinutesEntry.SetText(fmt.Sprintf("%d", minutes))
+	settingsIntervalMinutesEntry.SetPlaceHolder("Minutes")
 
 	// Checkboxes
 	settingsStartupCheck = widget.NewCheck("Run on startup", nil)
@@ -254,14 +266,32 @@ func createSettingsTab() fyne.CanvasObject {
 		saveSettings()
 	})
 
+	// Version info
+	versionLabel := widget.NewRichText()
+	versionLabel.ParseMarkdown(fmt.Sprintf("**Version Information**\n\n%s", GetFullVersionInfo()))
+	versionLabel.Wrapping = fyne.TextWrapWord
+
+	intervalContainer := container.NewGridWithColumns(2,
+		container.NewVBox(
+			widget.NewLabel("Hours:"),
+			settingsIntervalHoursEntry,
+		),
+		container.NewVBox(
+			widget.NewLabel("Minutes:"),
+			settingsIntervalMinutesEntry,
+		),
+	)
+
 	settingsContainer := container.NewVBox(
 		widget.NewForm(
-			widget.NewFormItem("Change Interval (hours)", settingsIntervalEntry),
+			widget.NewFormItem("Change Interval", intervalContainer),
 		),
 		settingsStartupCheck,
 		settingsNotifyCheck,
 		settingsDebugCheck,
 		settingsSaveBtn,
+		widget.NewSeparator(),
+		versionLabel,
 	)
 
 	return container.NewScroll(settingsContainer)
@@ -305,15 +335,33 @@ func showAddDNSDialog() {
 }
 
 func saveSettings() {
-	// Parse interval
-	var interval int
-	_, err := fmt.Sscanf(settingsIntervalEntry.Text, "%d", &interval)
-	if err != nil || interval <= 0 {
-		dialog.ShowError(fmt.Errorf("invalid interval: must be a positive number"), mainWindow)
+	// Parse hours and minutes
+	var hours, minutes int
+	_, err := fmt.Sscanf(settingsIntervalHoursEntry.Text, "%d", &hours)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("invalid hours: must be a number"), mainWindow)
 		return
 	}
 
-	config.ChangeIntervalHours = interval
+	_, err = fmt.Sscanf(settingsIntervalMinutesEntry.Text, "%d", &minutes)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("invalid minutes: must be a number"), mainWindow)
+		return
+	}
+
+	if hours < 0 || minutes < 0 {
+		dialog.ShowError(fmt.Errorf("hours and minutes must be non-negative"), mainWindow)
+		return
+	}
+
+	if hours == 0 && minutes == 0 {
+		dialog.ShowError(fmt.Errorf("interval must be greater than 0"), mainWindow)
+		return
+	}
+
+	totalMinutes := hours*60 + minutes
+	config.ChangeIntervalMinutes = totalMinutes
+	config.ChangeIntervalHours = 0 // Clear old value
 	config.RunOnStartup = settingsStartupCheck.Checked
 	config.NotifyUser = settingsNotifyCheck.Checked
 
@@ -337,7 +385,7 @@ func saveSettings() {
 		if appState.GetDebugMode() {
 			newTicker = time.NewTicker(10 * time.Second)
 		} else {
-			newTicker = time.NewTicker(time.Duration(config.ChangeIntervalHours) * time.Hour)
+			newTicker = time.NewTicker(time.Duration(config.ChangeIntervalMinutes) * time.Minute)
 		}
 		appState.SetTicker(newTicker)
 		go startTickerLoop(newTicker)
@@ -390,7 +438,11 @@ func startService() {
 	if appState.GetDebugMode() {
 		ticker = time.NewTicker(10 * time.Second)
 	} else {
-		ticker = time.NewTicker(time.Duration(config.ChangeIntervalHours) * time.Hour)
+		intervalMinutes := config.ChangeIntervalMinutes
+		if intervalMinutes == 0 && config.ChangeIntervalHours > 0 {
+			intervalMinutes = config.ChangeIntervalHours * 60
+		}
+		ticker = time.NewTicker(time.Duration(intervalMinutes) * time.Minute)
 	}
 	appState.SetTicker(ticker)
 
@@ -426,9 +478,28 @@ func stopService() {
 		appState.SetTicker(nil)
 	}
 
+	// Restore DNS to automatic/DHCP
+	go func() {
+		err := restoreDNS()
+		if err != nil {
+			appState.AddLog(fmt.Sprintf("ERROR: Failed to restore DNS: %v", err))
+			fyne.Do(func() {
+				dialog.ShowError(err, mainWindow)
+			})
+		} else {
+			appState.AddLog("DNS restored to automatic (DHCP)")
+		}
+		fyne.Do(func() {
+			updateLogsDisplay()
+			updateStatusDisplay()
+		})
+	}()
+
 	appState.AddLog("Service stopped")
-	updateLogsDisplay()
-	updateStatusDisplay()
+	fyne.Do(func() {
+		updateLogsDisplay()
+		updateStatusDisplay()
+	})
 }
 
 func startTickerLoop(ticker *time.Ticker) {

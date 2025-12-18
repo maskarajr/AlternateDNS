@@ -1,5 +1,17 @@
 #!/bin/bash
+# Build script for AlternateDNS
+# Usage: ./build.sh [version] [commit] [date]
+# Example: ./build.sh 1.0.0 abc123 2025-01-01
+
+# Get version info from arguments or use defaults
+VERSION=${1:-dev}
+GIT_COMMIT=${2:-unknown}
+BUILD_DATE=${3:-$(date +%Y-%m-%d)}
+
 echo "Building AlternateDNS for Linux/macOS (portable)..."
+echo "Version: $VERSION"
+echo "Commit: $GIT_COMMIT"
+echo "Build Date: $BUILD_DATE"
 echo ""
 echo "Checking for C compiler (required for Fyne GUI)..."
 echo ""
@@ -32,7 +44,7 @@ mkdir -p dist
 export CGO_ENABLED=1
 
 # Build with same flags as Windows (minus -H windowsgui which is Windows-only)
-go build -ldflags="-s -w" -o dist/AlternateDNS
+go build -ldflags="-s -w -X main.Version=$VERSION -X main.GitCommit=$GIT_COMMIT -X main.BuildDate=$BUILD_DATE" -o dist/AlternateDNS
 
 if [ $? -eq 0 ]; then
     # Copy default_config.yaml to dist folder for reference

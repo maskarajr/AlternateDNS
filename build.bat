@@ -1,5 +1,27 @@
 @echo off
+REM Build script for AlternateDNS
+REM Usage: build.bat [version] [commit] [date]
+REM Example: build.bat 1.0.0 abc123 2025-01-01
+
+setlocal
+
+REM Get version info from arguments or use defaults
+set VERSION=%1
+if "%VERSION%"=="" set VERSION=dev
+
+set GIT_COMMIT=%2
+if "%GIT_COMMIT%"=="" set GIT_COMMIT=unknown
+
+set BUILD_DATE=%3
+if "%BUILD_DATE%"=="" (
+    REM Use PowerShell to get date in YYYY-MM-DD format
+    for /f "delims=" %%I in ('powershell -Command "Get-Date -Format 'yyyy-MM-dd'"') do set BUILD_DATE=%%I
+)
+
 echo Building AlternateDNS for Windows (portable)...
+echo Version: %VERSION%
+echo Commit: %GIT_COMMIT%
+echo Build Date: %BUILD_DATE%
 echo.
 echo Checking for C compiler (required for Fyne GUI)...
 echo.
@@ -16,15 +38,35 @@ if errorlevel 1 (
     echo Warning: windres not found. Executable will build without Explorer icon.
     echo To fix: windres comes with MinGW-w64. Make sure it's in your PATH.
     echo The app will still work, just without the icon in Explorer.
-) else (
-    echo Compiling icon resource...
-    windres -o icon.syso icon.rc
-    if errorlevel 1 (
-        echo Warning: Failed to compile icon resource. Building without icon.
-    ) else (
-        echo Icon resource compiled successfully.
-    )
+    goto :skip_icon
 )
+
+REM Check if icon files exist
+if not exist "icon.ico" (
+    echo Warning: icon.ico not found. Executable will build without Explorer icon.
+    goto :skip_icon
+)
+if not exist "icon.rc" (
+    echo Warning: icon.rc not found. Executable will build without Explorer icon.
+    goto :skip_icon
+)
+
+echo Compiling icon resource...
+windres -o icon.syso icon.rc
+if errorlevel 1 (
+    echo Warning: Failed to compile icon resource. Building without icon.
+    if exist "icon.syso" del "icon.syso"
+    goto :skip_icon
+)
+
+if not exist "icon.syso" (
+    echo Warning: icon.syso was not created. Building without icon.
+    goto :skip_icon
+)
+
+echo Icon resource compiled successfully.
+
+:skip_icon
 
 echo.
 echo Starting build (this may take a minute)...
@@ -34,11 +76,16 @@ REM Create dist folder if it doesn't exist
 if not exist "dist" mkdir dist
 
 set CGO_ENABLED=1
-go build -ldflags="-s -w -H windowsgui" -o dist\AlternateDNS.exe
+go build -ldflags="-s -w -H windowsgui -X main.Version=%VERSION% -X main.GitCommit=%GIT_COMMIT% -X main.BuildDate=%BUILD_DATE%" -o dist\AlternateDNS.exe
+
+REM Check if build succeeded
+if errorlevel 1 goto :build_failed
 
 REM Clean up resource file after build
-if exist "icon.syso" del "icon.syso"
-if errorlevel 1 goto :build_failed
+if exist "icon.syso" (
+    del "icon.syso"
+    echo Cleaned up icon.syso
+)
 
 REM Copy default_config.yaml to dist folder for reference
 if exist "default_config.yaml" (
