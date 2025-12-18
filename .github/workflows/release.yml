@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows
+          - os: windows-latest
             goos: windows
             goarch: amd64
             ext: .exe
@@ -69,13 +69,13 @@ jobs:
           echo "Build Date: $DATE"
 
       - name: Set up MinGW (Windows only)
-        if: matrix.os == 'windows'
+        if: matrix.os == 'windows-latest'
         uses: egor-tensin/setup-mingw@v2
         with:
           platform: x64
 
       - name: Compile icon resource (Windows only)
-        if: matrix.os == 'windows'
+        if: matrix.os == 'windows-latest'
         run: |
           if [ ! -f "icon.rc" ]; then
             echo "Warning: icon.rc not found, skipping icon compilation"
@@ -184,6 +184,20 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
+
+      - name: Get build date
+        id: date
+        run: |
+          if ! DATE=$(date -u +'%Y-%m-%d' 2>&1); then
+            echo "ERROR: Failed to get build date: $DATE"
+            exit 1
+          fi
+          if [ -z "$DATE" ]; then
+            echo "WARNING: Build date is empty, using fallback"
+            DATE=$(date +'%Y-%m-%d')
+          fi
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          echo "Build Date: $DATE"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
