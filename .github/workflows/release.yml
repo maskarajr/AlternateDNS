@@ -51,7 +51,7 @@ jobs:
 
       - name: Install X11 development libraries (Linux only)
         if: matrix.goos == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev xorg-dev gcc-aarch64-linux-gnu
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev xorg-dev libayatana-appindicator3-dev gcc-aarch64-linux-gnu
 
       - name: Get version from tag
         id: version
