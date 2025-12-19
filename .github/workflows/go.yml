@@ -134,13 +134,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Install X11 development libraries
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libgl1-mesa-dev xorg-dev
+      
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.22.3'
       
+      - name: Download dependencies
+        env:
+          CGO_ENABLED: 1
+        run: go mod download
+      
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v3
         with:
           version: latest
-          args: --timeout=5m --out-format=colored-line-number
+          args: --out-format=colored-line-number
