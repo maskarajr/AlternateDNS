@@ -103,41 +103,67 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Build
+    - name: Build (macOS)
+      if: matrix.os == 'macos-latest'
       env:
         CGO_ENABLED: 1
-      shell: bash
-      run: |
         # Workaround for duplicate symbol conflict on macOS
         # Both getlantern/systray and fyne.io/systray define Objective-C MenuItem classes
-        if [ "${{ matrix.os }}" == "macos-latest" ]; then
-          export CGO_LDFLAGS="-Wl,-flat_namespace"
-          echo "Set CGO_LDFLAGS=$CGO_LDFLAGS for macOS build"
-        fi
-        
-        if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
-          xvfb-run -a go build -v ./...
-        else
-          go build -v ./...
-        fi
+        # Use flat namespace to allow duplicate symbols (safe because we only use getlantern/systray)
+        CGO_LDFLAGS: "-Wl,-flat_namespace"
+      shell: bash
+      run: |
+        echo "Building on macOS with CGO_LDFLAGS=$CGO_LDFLAGS"
+        go build -v ./...
 
-    - name: Test
+    - name: Build (Linux)
+      if: matrix.os == 'ubuntu-latest'
       env:
         CGO_ENABLED: 1
       shell: bash
       run: |
+        echo "Building on Linux"
+        xvfb-run -a go build -v ./...
+
+    - name: Build (Windows)
+      if: matrix.os == 'windows-latest'
+      env:
+        CGO_ENABLED: 1
+      shell: bash
+      run: |
+        echo "Building on Windows"
+        go build -v ./...
+
+    - name: Test (macOS)
+      if: matrix.os == 'macos-latest'
+      env:
+        CGO_ENABLED: 1
         # Workaround for duplicate symbol conflict on macOS
         # Both getlantern/systray and fyne.io/systray define Objective-C MenuItem classes
-        if [ "${{ matrix.os }}" == "macos-latest" ]; then
-          export CGO_LDFLAGS="-Wl,-flat_namespace"
-          echo "Set CGO_LDFLAGS=$CGO_LDFLAGS for macOS test"
-        fi
-        
-        if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
-          xvfb-run -a go test -v -race ./...
-        else
-          go test -v -race ./...
-        fi
+        # Use flat namespace to allow duplicate symbols (safe because we only use getlantern/systray)
+        CGO_LDFLAGS: "-Wl,-flat_namespace"
+      shell: bash
+      run: |
+        echo "Testing on macOS with CGO_LDFLAGS=$CGO_LDFLAGS"
+        go test -v -race ./...
+
+    - name: Test (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      env:
+        CGO_ENABLED: 1
+      shell: bash
+      run: |
+        echo "Testing on Linux"
+        xvfb-run -a go test -v -race ./...
+
+    - name: Test (Windows)
+      if: matrix.os == 'windows-latest'
+      env:
+        CGO_ENABLED: 1
+      shell: bash
+      run: |
+        echo "Testing on Windows"
+        go test -v -race ./...
 
   lint:
     runs-on: ubuntu-latest
