@@ -512,7 +512,9 @@ func startTickerLoop(ticker *time.Ticker) {
 			appState.AddLog(fmt.Sprintf("ERROR: %v", err))
 			updateLogsDisplay()
 			if config.NotifyUser {
-				beeep.Alert("DNS Change Error", err.Error(), "")
+				if alertErr := beeep.Alert("DNS Change Error", err.Error(), ""); alertErr != nil {
+					appState.AddLog(fmt.Sprintf("WARNING: Failed to show alert: %v", alertErr))
+				}
 			}
 		} else {
 			dns, _ := appState.GetCurrentDNS()

@@ -135,7 +135,9 @@ func onReady() {
 			go func() {
 				err := changeDNS(true) // Force change from systray menu
 				if err != nil {
-					beeep.Alert("DNS Change Error", err.Error(), "")
+					if alertErr := beeep.Alert("DNS Change Error", err.Error(), ""); alertErr != nil {
+						appState.AddLog(fmt.Sprintf("WARNING: Failed to show alert: %v", alertErr))
+					}
 					appState.AddLog(fmt.Sprintf("ERROR: %v", err))
 					updateLogsDisplay()
 				} else {

@@ -31,4 +31,3 @@ func getConfigPath() (string, error) {
 	exeDir := filepath.Dir(exePath)
 	return filepath.Join(exeDir, "config.yaml"), nil
 }
-
