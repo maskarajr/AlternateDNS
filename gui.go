@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/gen2brain/beeep"
@@ -75,10 +76,78 @@ func setupGUI() {
 		mainWindow.Hide()
 	})
 
+	// Set up system tray using Fyne's native desktop API
+	setupSystemTray()
+
 	// Start update timer
 	startUpdateTimer()
 
 	mainWindow.Show()
+}
+
+// setupSystemTray sets up the system tray menu using Fyne's native desktop API
+func setupSystemTray() {
+	// Check if the app supports system tray (desktop environment)
+	if desk, ok := guiApp.(desktop.App); ok {
+		// Create system tray menu
+		menu := fyne.NewMenu("AlternateDNS",
+			fyne.NewMenuItem("Open Window", func() {
+				showWindow()
+			}),
+			fyne.NewMenuItem("Change DNS", func() {
+				go func() {
+					err := changeDNS(true) // Force change from systray menu
+					if err != nil {
+						if alertErr := beeep.Alert("DNS Change Error", err.Error(), ""); alertErr != nil {
+							appState.AddLog(fmt.Sprintf("WARNING: Failed to show alert: %v", alertErr))
+						}
+						appState.AddLog(fmt.Sprintf("ERROR: %v", err))
+						updateLogsDisplay()
+					} else {
+						dns, idx := appState.GetCurrentDNS()
+						appState.AddLog(fmt.Sprintf("DNS changed to %s (index %d)", dns, idx))
+						updateLogsDisplay()
+						updateStatusDisplay()
+					}
+				}()
+			}),
+			fyne.NewMenuItemSeparator(),
+			fyne.NewMenuItem("Quit", func() {
+				// Stop service if running
+				if appState.IsRunning() {
+					stopService()
+				}
+				// Restore DNS to automatic before exiting
+				if err := restoreDNS(); err != nil {
+					if appState.GetDebugMode() {
+						appState.AddLog(fmt.Sprintf("WARNING: Failed to restore DNS on exit: %v", err))
+					}
+				}
+				appState.SetRunning(false)
+				ticker := appState.GetTicker()
+				if ticker != nil {
+					ticker.Stop()
+					appState.SetTicker(nil)
+				}
+				if appState.GetDebugMode() {
+					appState.AddLog("Exiting the application")
+				}
+				guiApp.Quit()
+				os.Exit(0)
+			}),
+		)
+
+		// Set the system tray menu
+		desk.SetSystemTrayMenu(menu)
+		// Set system tray icon (uses the app icon)
+		trayIcon := fyne.NewStaticResource("icon.ico", getEmbeddedIcon())
+		desk.SetSystemTrayIcon(trayIcon)
+
+		// Auto-start log message if configured
+		if config.RunOnStartup {
+			appState.AddLog("Application started (auto-start disabled, use GUI to start service)")
+		}
+	}
 }
 
 func createStatusTab() fyne.CanvasObject {
@@ -512,6 +581,7 @@ func startTickerLoop(ticker *time.Ticker) {
 			appState.AddLog(fmt.Sprintf("ERROR: %v", err))
 			updateLogsDisplay()
 			if config.NotifyUser {
+
 				if alertErr := beeep.Alert("DNS Change Error", err.Error(), ""); alertErr != nil {
 					appState.AddLog(fmt.Sprintf("WARNING: Failed to show alert: %v", alertErr))
 				}

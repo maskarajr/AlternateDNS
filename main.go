@@ -12,7 +12,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"github.com/gen2brain/beeep"
-	"github.com/getlantern/systray"
 	"gopkg.in/yaml.v2"
 )
 
@@ -94,86 +93,14 @@ func main() {
 	}
 
 	// Initialize GUI on main thread (Fyne requirement)
+	// This will also set up the system tray using Fyne's native API
 	setupGUI()
-
-	// Initialize systray in background goroutine
-	go func() {
-		systray.Run(onReady, onExit)
-	}()
 
 	// Run Fyne event loop (this blocks and handles GUI events)
 	guiApp.Run()
 }
 
-func onReady() {
-	systray.SetIcon(appIcon)
-	systray.SetTitle("AlternateDNS")
-	systray.SetTooltip("AlternateDNS - DNS Rotation Tool")
-
-	mOpenWindow := systray.AddMenuItem("Open Window", "Show the main window")
-	mChange := systray.AddMenuItem("Change DNS", "Cycle to the next DNS server")
-	mQuit := systray.AddMenuItem("Quit", "Quit the application")
-
-	// Auto-start if configured
-	if config.RunOnStartup {
-		// Don't auto-start, let user control via GUI
-		appState.AddLog("Application started (auto-start disabled, use GUI to start service)")
-	}
-
-	for {
-		select {
-		case <-mOpenWindow.ClickedCh:
-			showWindow()
-		case <-mQuit.ClickedCh:
-			// Stop service if running
-			if appState.IsRunning() {
-				stopService()
-			}
-			systray.Quit()
-			os.Exit(0)
-		case <-mChange.ClickedCh:
-			go func() {
-				err := changeDNS(true) // Force change from systray menu
-				if err != nil {
-					if alertErr := beeep.Alert("DNS Change Error", err.Error(), ""); alertErr != nil {
-						appState.AddLog(fmt.Sprintf("WARNING: Failed to show alert: %v", alertErr))
-					}
-					appState.AddLog(fmt.Sprintf("ERROR: %v", err))
-					updateLogsDisplay()
-				} else {
-					dns, idx := appState.GetCurrentDNS()
-					appState.AddLog(fmt.Sprintf("DNS changed to %s (index %d)", dns, idx))
-					updateLogsDisplay()
-					updateStatusDisplay()
-				}
-			}()
-		}
-	}
-}
-
-// Tick is now handled by startTickerLoop in gui.go
-
-func onExit() {
-	// Stop service if running (this will restore DNS via stopService)
-	if appState.IsRunning() {
-		// Restore DNS to automatic before exiting
-		if err := restoreDNS(); err != nil {
-			// Log error but continue with exit process
-			if appState.GetDebugMode() {
-				appState.AddLog(fmt.Sprintf("WARNING: Failed to restore DNS on exit: %v", err))
-			}
-		}
-		appState.SetRunning(false)
-		ticker := appState.GetTicker()
-		if ticker != nil {
-			ticker.Stop()
-			appState.SetTicker(nil)
-		}
-	}
-	if appState.GetDebugMode() {
-		appState.AddLog("Exiting the application")
-	}
-}
+// System tray menu items are now handled by Fyne's native desktop API in setupGUI()
 
 func checkAdmin() error {
 	if appState.GetDebugMode() {

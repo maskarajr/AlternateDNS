@@ -103,67 +103,31 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Build (macOS)
-      if: matrix.os == 'macos-latest'
+    - name: Build
       env:
         CGO_ENABLED: 1
-        # Workaround for duplicate symbol conflict on macOS
-        # Both getlantern/systray and fyne.io/systray define Objective-C MenuItem classes
-        # Use flat namespace to allow duplicate symbols (safe because we only use getlantern/systray)
-        CGO_LDFLAGS: "-Wl,-flat_namespace"
       shell: bash
       run: |
-        echo "Building on macOS with CGO_LDFLAGS=$CGO_LDFLAGS"
-        go build -v ./...
+        if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
+          echo "Building on Linux"
+          xvfb-run -a go build -v ./...
+        else
+          echo "Building on ${{ matrix.os }}"
+          go build -v ./...
+        fi
 
-    - name: Build (Linux)
-      if: matrix.os == 'ubuntu-latest'
+    - name: Test
       env:
         CGO_ENABLED: 1
       shell: bash
       run: |
-        echo "Building on Linux"
-        xvfb-run -a go build -v ./...
-
-    - name: Build (Windows)
-      if: matrix.os == 'windows-latest'
-      env:
-        CGO_ENABLED: 1
-      shell: bash
-      run: |
-        echo "Building on Windows"
-        go build -v ./...
-
-    - name: Test (macOS)
-      if: matrix.os == 'macos-latest'
-      env:
-        CGO_ENABLED: 1
-        # Workaround for duplicate symbol conflict on macOS
-        # Both getlantern/systray and fyne.io/systray define Objective-C MenuItem classes
-        # Use flat namespace to allow duplicate symbols (safe because we only use getlantern/systray)
-        CGO_LDFLAGS: "-Wl,-flat_namespace"
-      shell: bash
-      run: |
-        echo "Testing on macOS with CGO_LDFLAGS=$CGO_LDFLAGS"
-        go test -v -race ./...
-
-    - name: Test (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      env:
-        CGO_ENABLED: 1
-      shell: bash
-      run: |
-        echo "Testing on Linux"
-        xvfb-run -a go test -v -race ./...
-
-    - name: Test (Windows)
-      if: matrix.os == 'windows-latest'
-      env:
-        CGO_ENABLED: 1
-      shell: bash
-      run: |
-        echo "Testing on Windows"
-        go test -v -race ./...
+        if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
+          echo "Testing on Linux"
+          xvfb-run -a go test -v -race ./...
+        else
+          echo "Testing on ${{ matrix.os }}"
+          go test -v -race ./...
+        fi
 
   lint:
     runs-on: ubuntu-latest
