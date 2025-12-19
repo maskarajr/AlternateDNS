@@ -106,6 +106,7 @@ jobs:
     - name: Build
       env:
         CGO_ENABLED: 1
+      shell: bash
       run: |
         # Workaround for duplicate symbol conflict on macOS
         if [ "${{ matrix.os }}" == "macos-latest" ]; then
@@ -121,6 +122,7 @@ jobs:
     - name: Test
       env:
         CGO_ENABLED: 1
+      shell: bash
       run: |
         # Workaround for duplicate symbol conflict on macOS
         if [ "${{ matrix.os }}" == "macos-latest" ]; then
