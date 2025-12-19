@@ -230,7 +230,10 @@ func createDNSTab() fyne.CanvasObject {
 			return widget.NewLabel("")
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			label := obj.(*widget.Label)
+			label, ok := obj.(*widget.Label)
+			if !ok {
+				return
+			}
 			if id < len(config.DNSAddresses) {
 				currentDNS, currentIdx := appState.GetCurrentDNS()
 				dns := config.DNSAddresses[id]
@@ -749,28 +752,47 @@ func createDNSTesterTab() fyne.CanvasObject {
 			result := testerResults[id]
 
 			// Get the HBox container and its children
-			box := obj.(*fyne.Container)
+			box, ok := obj.(*fyne.Container)
+			if !ok {
+				return
+			}
 			labels := box.Objects
 
 			// DNS server
-			labels[0].(*widget.Label).SetText(result.DNS)
+			if len(labels) > 0 {
+				if dnsLabel, ok := labels[0].(*widget.Label); ok {
+					dnsLabel.SetText(result.DNS)
+				}
+			}
 
 			// Latency
-			if result.AvgLatency > 0 {
-				labels[1].(*widget.Label).SetText(result.AvgLatency.Round(time.Millisecond).String())
-			} else {
-				labels[1].(*widget.Label).SetText("N/A")
+			if len(labels) > 1 {
+				if latencyLabel, ok := labels[1].(*widget.Label); ok {
+					if result.AvgLatency > 0 {
+						latencyLabel.SetText(result.AvgLatency.Round(time.Millisecond).String())
+					} else {
+						latencyLabel.SetText("N/A")
+					}
+				}
 			}
 
 			// Success rate
-			labels[2].(*widget.Label).SetText(fmt.Sprintf("%.1f%%", result.SuccessRate))
+			if len(labels) > 2 {
+				if successLabel, ok := labels[2].(*widget.Label); ok {
+					successLabel.SetText(fmt.Sprintf("%.1f%%", result.SuccessRate))
+				}
+			}
 
 			// Status
-			statusText := result.Status
-			if result.Error != "" {
-				statusText += " (" + result.Error + ")"
+			if len(labels) > 3 {
+				if statusLabel, ok := labels[3].(*widget.Label); ok {
+					statusText := result.Status
+					if result.Error != "" {
+						statusText += " (" + result.Error + ")"
+					}
+					statusLabel.SetText(statusText)
+				}
 			}
-			labels[3].(*widget.Label).SetText(statusText)
 		},
 	)
 

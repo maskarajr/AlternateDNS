@@ -3,11 +3,6 @@
 
 run:
   timeout: 5m
-  skip-dirs:
-    - vendor
-  skip-files:
-    - ".*\\.pb\\.go$"
-    - ".*\\.gen\\.go$"
   # Skip CGO packages that don't have export data
   skip-packages:
     - github.com/go-gl/gl
@@ -17,6 +12,11 @@ run:
 
 issues:
   exclude-use-default: false
+  exclude-dirs:
+    - vendor
+  exclude-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.gen\\.go$"
   exclude-rules:
     # Exclude test files from errcheck
     - path: _test\.go
