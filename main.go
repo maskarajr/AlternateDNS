@@ -157,7 +157,12 @@ func onExit() {
 	// Stop service if running (this will restore DNS via stopService)
 	if appState.IsRunning() {
 		// Restore DNS to automatic before exiting
-		restoreDNS()
+		if err := restoreDNS(); err != nil {
+			// Log error but continue with exit process
+			if appState.GetDebugMode() {
+				appState.AddLog(fmt.Sprintf("WARNING: Failed to restore DNS on exit: %v", err))
+			}
+		}
 		appState.SetRunning(false)
 		ticker := appState.GetTicker()
 		if ticker != nil {

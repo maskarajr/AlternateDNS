@@ -106,10 +106,15 @@ jobs:
     - name: Build
       env:
         CGO_ENABLED: 1
-        # Workaround for duplicate symbol conflict on macOS
-        CGO_LDFLAGS: ${{ matrix.os == 'macos-latest' && '-Wl,-flat_namespace' || '' }}
       shell: bash
       run: |
+        # Workaround for duplicate symbol conflict on macOS
+        # Both getlantern/systray and fyne.io/systray define Objective-C MenuItem classes
+        if [ "${{ matrix.os }}" == "macos-latest" ]; then
+          export CGO_LDFLAGS="-Wl,-flat_namespace"
+          echo "Set CGO_LDFLAGS=$CGO_LDFLAGS for macOS build"
+        fi
+        
         if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
           xvfb-run -a go build -v ./...
         else
@@ -119,10 +124,15 @@ jobs:
     - name: Test
       env:
         CGO_ENABLED: 1
-        # Workaround for duplicate symbol conflict on macOS
-        CGO_LDFLAGS: ${{ matrix.os == 'macos-latest' && '-Wl,-flat_namespace' || '' }}
       shell: bash
       run: |
+        # Workaround for duplicate symbol conflict on macOS
+        # Both getlantern/systray and fyne.io/systray define Objective-C MenuItem classes
+        if [ "${{ matrix.os }}" == "macos-latest" ]; then
+          export CGO_LDFLAGS="-Wl,-flat_namespace"
+          echo "Set CGO_LDFLAGS=$CGO_LDFLAGS for macOS test"
+        fi
+        
         if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
           xvfb-run -a go test -v -race ./...
         else
