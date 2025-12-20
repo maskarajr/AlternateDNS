@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes yet. Future changes will be documented here._
+
+## [1.1.0]
+
 ### Added
 - Hours and minutes interval configuration (replaces hours-only)
 - DNS restoration to automatic/DHCP when service is stopped
