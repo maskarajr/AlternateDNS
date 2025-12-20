@@ -319,14 +319,25 @@ jobs:
           RELEASE_DATE=${{ steps.date.outputs.date }}
           
           {
-            echo "# v${VERSION} Linux Release"
+            echo "# v${VERSION} Stable Release"
             echo ""
             echo "**Release date:** ${RELEASE_DATE}"
             echo ""
-            echo "## Linux Builds"
+            echo "## Available Platforms"
             echo ""
-            echo "This release includes Linux builds for the following architectures:"
-            echo "- amd64 (x86_64)"
+            echo "This release includes builds for the following platforms:"
+            echo ""
+            echo "### Windows"
+            echo "- **amd64** (x86_64) - Available"
+            echo ""
+            echo "### Linux"
+            echo "- **amd64** (x86_64) - Available"
+            echo ""
+            echo "### macOS"
+            echo "- **amd64** (Intel Macs) - Available"
+            echo "- **arm64** (Apple Silicon) - Available"
+            echo ""
+            echo "---"
             echo ""
             
             if [ -f "CHANGELOG.md" ]; then
@@ -375,16 +386,12 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: release/*.tar.gz release/*.sha256
+          files: |
+            release/*.tar.gz
+            release/*.sha256
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
-          body: |
-            ## Linux Builds
-            
-            This release includes Linux builds for the following architectures:
-            - amd64 (x86_64)
-            
-            ${{ steps.notes.outputs.notes }}
+          body: ${{ steps.notes.outputs.notes }}
           draft: false
           prerelease: false
         env:
