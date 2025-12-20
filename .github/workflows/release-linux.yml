@@ -305,6 +305,12 @@ jobs:
             echo "ERROR: No archives were created!"
             exit 1
           fi
+          
+          # Clean up: remove config file since it's already in the archives
+          if [ -f "default_config.yaml" ]; then
+            rm default_config.yaml
+            echo "Removed default_config.yaml (already included in archives)"
+          fi
 
       - name: Generate release notes
         id: notes
@@ -369,7 +375,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: release/*
+          files: release/*.tar.gz release/*.sha256
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
           body: |
